@@ -10,11 +10,24 @@ reg [2:0]  wb;
 reg [4:0]  rid1, rid2, rid3;
 reg [31:0] r1, r2, r3;
 
-wire [2:0]  cv;
+// Dummy — Load Buffer
+reg  [4:0]  lrid_dummy;
+wire        lready;
+wire [31:0] laddr;
+reg         lb_done;
+reg  [4:0]  lb_rid;
+
+// Dummy — Store Buffer
+reg  [4:0]  srid_dummy;
+wire [31:0] saddr;
+
+// Saídas do ROB
 wire [2:0]  cdst1, cdst2, cdst3;
 wire [4:0]  crid1, crid2, crid3;
+wire [4:0]  crob_id1, crob_id2, crob_id3;
 wire [31:0] cr1, cr2, cr3;
 wire        stop;
+wire [4:0]  rob_tail;
 
 rob U_rob (
     .clk(clk), .rst(rst),
@@ -24,11 +37,15 @@ rob U_rob (
     .wb(wb),
     .rid1(rid1), .rid2(rid2), .rid3(rid3),
     .r1(r1), .r2(r2), .r3(r3),
-    .cv(cv),
     .cdst1(cdst1), .cdst2(cdst2), .cdst3(cdst3),
     .crid1(crid1), .crid2(crid2), .crid3(crid3),
+    .crob_id1(crob_id1), .crob_id2(crob_id2), .crob_id3(crob_id3),
     .cr1(cr1), .cr2(cr2), .cr3(cr3),
-    .stop(stop)
+    .lrid(lrid_dummy), .lready(lready), .laddr(laddr),
+    .lb_done(lb_done), .lb_rid(lb_rid),
+    .srid(srid_dummy), .saddr(saddr),
+    .stop(stop),
+    .rob_tail(rob_tail)
 );
 
 always #5 clk = ~clk;
@@ -82,16 +99,14 @@ endtask
 
 task mostra_estado;
     begin
-        $display("  tail=%0d head=%0d ocupacao=%0d stop=%b",
+        $display("  tail=%0d head=%0d ocupacao=%0d stop=%b rob_tail=%0d",
             U_rob.tail, U_rob.head,
-            U_rob.tail - U_rob.head, stop);
-        $display("  commits: cv=%03b", cv);
-        if(cv[0]) $display("    [commit1] dst=%03b rd=%0d result=%0d",
-            cdst1, crid1, cr1);
-        if(cv[1]) $display("    [commit2] dst=%03b rd=%0d result=%0d",
-            cdst2, crid2, cr2);
-        if(cv[2]) $display("    [commit3] dst=%03b rd=%0d result=%0d",
-            cdst3, crid3, cr3);
+            U_rob.tail - U_rob.head, stop, rob_tail);
+        $display("  cdst1=%03b cdst2=%03b cdst3=%03b",
+            cdst1, cdst2, cdst3);
+        $display("  crob_id1=%0d crob_id2=%0d crob_id3=%0d",
+            crob_id1, crob_id2, crob_id3);
+        $display("  cr1=%0d cr2=%0d cr3=%0d", cr1, cr2, cr3);
     end
 endtask
 
@@ -108,10 +123,13 @@ initial begin
     wb = 3'b0;
     {rid1,rid2,rid3} = 15'b0;
     {r1,r2,r3}       = 96'b0;
+    lb_done = 0; lb_rid = 5'b0;
+    lrid_dummy = 5'b0;
+    srid_dummy = 5'b0;
     @(posedge clk); #1;
     rst = 0;
 
-    // dst: 001=banco, 010=pc, 011=banco+pc, 100=mem, 000=nada
+    // dst: 001=banco, 010=load, 011=banco+pc, 100=store, 000=nada
 
     $display("\n=== TESTE 1: Despacha 3 instrucoes ===");
     despacha(3'b111, 3'b001,3'b001,3'b000, 5'd1,5'd2,5'd3);
@@ -121,7 +139,7 @@ initial begin
     despacha(3'b011, 3'b001,3'b000,3'b000, 5'd4,5'd5,5'd0);
     mostra_estado;
 
-    $display("\n=== TESTE 3: Despacha 1 instrucao (wpc) ===");
+    $display("\n=== TESTE 3: Despacha 1 instrucao (Load) ===");
     despacha(3'b001, 3'b010,3'b000,3'b000, 5'd0,5'd0,5'd0);
     mostra_estado;
 
@@ -138,8 +156,13 @@ initial begin
     writeback(3'b001, 5'd3,5'd0,5'd0, 32'd300,32'd0,32'd0);
     #2; mostra_estado;
 
-    $display("\n=== TESTE 6: Writeback instrucao com wpc ===");
+    $display("\n=== TESTE 6: Writeback Load — seta addr_ready, nao ready ===");
     writeback(3'b001, 5'd5,5'd0,5'd0, 32'd999,32'd0,32'd0);
+    #2; mostra_estado;
+    $display("  Load Buffer sinaliza lb_done...");
+    lb_done = 1; lb_rid = 5'd5;
+    @(posedge clk); #1;
+    lb_done = 0;
     #2; mostra_estado;
 
     $display("\n=== TESTE 7: Reset ===");
