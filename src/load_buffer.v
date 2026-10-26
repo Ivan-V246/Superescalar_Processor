@@ -10,6 +10,13 @@ module load_buffer(
     output wire [4:0]  lrid,    // Rob id do Load mais antigo sem leitura
     input  wire        lready,  // O endereço desse Load já foi calculado?
 
+    // Consulta ao Store Buffer
+    input  wire [4:0]  sb_tail,  // Tail do Store Buffer, para a idade do Load
+    output wire [4:0]  q_idade,  // Idade do Load mais antigo sem leitura
+    input  wire        q_espera, // Há Store mais antigo de endereço desconhecido que pode coincidir
+    input  wire        q_hit,    // Há Store mais antigo no mesmo endereço: o dado vem dele
+    input  wire [31:0] q_dado,   // Dado do Store (forwarding)
+
     // Memória
     output wire        mem_req,
     input  wire [31:0] mem_data,
@@ -34,10 +41,8 @@ module load_buffer(
     // [36:32] → rob_id (5 bits)
     // [31:0]  → dado (32 bits)
     reg [37:0] buffer [0:15];
+    reg [4:0]  idade  [0:15];   // Tail do Store Buffer no despacho: Stores mais antigos estão antes dele
     reg [4:0] head, mem_ptr, tail;
-
-    reg [4:0] lb_rid_reg;
-    reg       mem_req_prev;
 
     wire [4:0] head2 = head + 1;
     wire [4:0] head3 = head + 2;
@@ -50,6 +55,14 @@ module load_buffer(
     wire is_load3 = v[2] & (dst3 == 3'b010);
 
     wire [2:0] dispatched = is_load1 + is_load2 + is_load3;
+
+    // Idade — conta os Stores dos slots anteriores do mesmo grupo
+    wire is_store1 = v[0] & (dst1 == 3'b100);
+    wire is_store2 = v[1] & (dst2 == 3'b100);
+
+    wire [4:0] idade1 = sb_tail;
+    wire [4:0] idade2 = sb_tail + is_store1;
+    wire [4:0] idade3 = sb_tail + is_store1 + is_store2;
 
     // Commit
     wire commit1 = (cv[0] & (crob_id1 == buffer[head[3:0]][36:32]))  |
@@ -66,9 +79,20 @@ module load_buffer(
     wire [2:0] aposentados = commit1 + commit2 + commit3;
 
     assign lrid    = buffer[mem_ptr[3:0]][36:32];
-    assign mem_req = lready & (mem_ptr != tail) & !mem_done;
-    assign lb_done = mem_done;
-    assign lb_rid  = lb_rid_reg;
+    assign q_idade = idade[mem_ptr[3:0]];
+
+    // O Load em mem_ptr termina pela memória (um ciclo depois do mem_req)
+    // ou por forwarding (no mesmo ciclo da consulta)
+    wire pronto = lready & !q_espera & (mem_ptr != tail) & !mem_done;
+    wire fwd    = pronto & q_hit;
+    assign mem_req = pronto & !q_hit;
+
+    wire        termina   = mem_done | fwd;
+    wire [31:0] dado_lido = fwd ? q_dado : mem_data;
+
+    // mem_ptr só avança quando o Load termina, então ele ainda aponta para esse Load
+    assign lb_done = termina;
+    assign lb_rid  = buffer[mem_ptr[3:0]][36:32];
 
     assign lb_dado1 = buffer[head[3:0]][31:0];
     assign lb_dado2 = buffer[head2[3:0]][31:0];
@@ -82,44 +106,46 @@ module load_buffer(
             head         <= 5'd0;
             mem_ptr      <= 5'd0;
             tail         <= 5'd0;
-            lb_rid_reg   <= 5'd0;
-            mem_req_prev <= 1'b0;
-            for (i = 0; i < 16; i = i + 1)
+            for (i = 0; i < 16; i = i + 1) begin
                 buffer[i] <= 38'b0;
+                idade[i]  <= 5'b0;
+            end
         end else begin
             tail <= tail + dispatched;
             head <= head + aposentados;
 
-            mem_req_prev <= mem_req;
-            if(mem_req && !mem_req_prev)
-                lb_rid_reg <= buffer[mem_ptr[3:0]][36:32];
-
             // Despacho compactado
             case({is_load1, is_load2, is_load3})
-                3'b001: buffer[tail[3:0]]  <= {1'b0, rob_id3, 32'b0};
-                3'b010: buffer[tail[3:0]]  <= {1'b0, rob_id2, 32'b0};
-                3'b011: begin
-                    buffer[tail[3:0]]  <= {1'b0, rob_id2, 32'b0};
-                    buffer[tail2[3:0]] <= {1'b0, rob_id3, 32'b0};
+                3'b001: begin
+                    buffer[tail[3:0]]  <= {1'b0, rob_id3, 32'b0}; idade[tail[3:0]]  <= idade3;
                 end
-                3'b100: buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0};
+                3'b010: begin
+                    buffer[tail[3:0]]  <= {1'b0, rob_id2, 32'b0}; idade[tail[3:0]]  <= idade2;
+                end
+                3'b011: begin
+                    buffer[tail[3:0]]  <= {1'b0, rob_id2, 32'b0}; idade[tail[3:0]]  <= idade2;
+                    buffer[tail2[3:0]] <= {1'b0, rob_id3, 32'b0}; idade[tail2[3:0]] <= idade3;
+                end
+                3'b100: begin
+                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0}; idade[tail[3:0]]  <= idade1;
+                end
                 3'b101: begin
-                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0};
-                    buffer[tail2[3:0]] <= {1'b0, rob_id3, 32'b0};
+                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0}; idade[tail[3:0]]  <= idade1;
+                    buffer[tail2[3:0]] <= {1'b0, rob_id3, 32'b0}; idade[tail2[3:0]] <= idade3;
                 end
                 3'b110: begin
-                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0};
-                    buffer[tail2[3:0]] <= {1'b0, rob_id2, 32'b0};
+                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0}; idade[tail[3:0]]  <= idade1;
+                    buffer[tail2[3:0]] <= {1'b0, rob_id2, 32'b0}; idade[tail2[3:0]] <= idade2;
                 end
                 3'b111: begin
-                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0};
-                    buffer[tail2[3:0]] <= {1'b0, rob_id2, 32'b0};
-                    buffer[tail3[3:0]] <= {1'b0, rob_id3, 32'b0};
+                    buffer[tail[3:0]]  <= {1'b0, rob_id1, 32'b0}; idade[tail[3:0]]  <= idade1;
+                    buffer[tail2[3:0]] <= {1'b0, rob_id2, 32'b0}; idade[tail2[3:0]] <= idade2;
+                    buffer[tail3[3:0]] <= {1'b0, rob_id3, 32'b0}; idade[tail3[3:0]] <= idade3;
                 end
             endcase
 
-            if(mem_done) begin
-                buffer[mem_ptr[3:0]][31:0] <= mem_data;
+            if(termina) begin
+                buffer[mem_ptr[3:0]][31:0] <= dado_lido;
                 buffer[mem_ptr[3:0]][37]   <= 1'b1;
                 mem_ptr <= mem_ptr + 1;
             end

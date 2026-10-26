@@ -66,6 +66,9 @@ module processador (input clk, input rst);
     wire [31:0] sb_mem_addr, sb_mem_dado;
     wire [31:0] med_saida;
     wire [2:0]  cv_store;
+    wire [4:0]  sb_tail, lb_q_idade;
+    wire        sb_q_espera, sb_q_hit;
+    wire [31:0] sb_q_dado;
 
     wire [4:0]  lrid, lb_rid;
     wire        lready, lb_done, lb_mem_req, lb_stop;
@@ -206,9 +209,16 @@ module processador (input clk, input rst);
         .clk(clk), .rst(rst),
         .v(disp_v),
         .dst1(disp_dst1), .dst2(disp_dst2), .dst3(disp_dst3),
+        .rob_id1(rob_id1), .rob_id2(rob_id2), .rob_id3(rob_id3),
         .dado1(disp_dado1), .dado2(disp_dado2), .dado3(disp_dado3),
+        // endereços, vindos dos caminhos
+        .wb({1'b0, wb2, wb1}),
+        .rid1(rid1), .rid2(rid2), .rid3(5'd0),
+        .r1(r1),     .r2(r2),     .r3(32'd0),
         .cv(cv_store),
-        .cr1(commit_r1), .cr2(commit_r2), .cr3(commit_r3),
+        // consulta do load buffer
+        .sb_tail(sb_tail), .q_idade(lb_q_idade), .q_addr(laddr),
+        .q_espera(sb_q_espera), .q_hit(sb_q_hit), .q_dado(sb_q_dado),
         .mem_req(sb_mem_req), .mem_addr(sb_mem_addr), .mem_dado(sb_mem_dado),
         .stop(sb_stop)
     );
@@ -219,6 +229,8 @@ module processador (input clk, input rst);
         .dst1(disp_dst1), .dst2(disp_dst2), .dst3(disp_dst3),
         .rob_id1(rob_id1), .rob_id2(rob_id2), .rob_id3(rob_id3),
         .lrid(lrid), .lready(lready),
+        .sb_tail(sb_tail), .q_idade(lb_q_idade),
+        .q_espera(sb_q_espera), .q_hit(sb_q_hit), .q_dado(sb_q_dado),
         .mem_req(lb_mem_req), .mem_data(lb_mem_data), .mem_done(lb_mem_done),
         .lb_done(lb_done), .lb_rid(lb_rid),
         .cv(cv_load),
