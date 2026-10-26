@@ -62,8 +62,6 @@ module processador (input clk, input rst);
     wire [4:0]  rob_id3;
     wire [31:0] disp_dado1, disp_dado2, disp_dado3;
     wire [4:0]  commit_rob_id1, commit_rob_id2, commit_rob_id3;
-    wire [4:0]  srid;
-    wire [31:0] saddr;
     wire        sb_mem_req, sb_stop;
     wire [31:0] sb_mem_addr, sb_mem_dado;
     wire [31:0] med_saida;
@@ -196,7 +194,7 @@ module processador (input clk, input rst);
 
         // loads e stores
         .lrid(lrid), .lready(lready), .laddr(laddr),
-        .srid(srid), .saddr(saddr),
+        .srid(5'd0), .saddr(),                   // o store buffer guarda o próprio endereço
         .lb_done(lb_done), .lb_rid(lb_rid),
 
         // para o despacho
@@ -208,11 +206,9 @@ module processador (input clk, input rst);
         .clk(clk), .rst(rst),
         .v(disp_v),
         .dst1(disp_dst1), .dst2(disp_dst2), .dst3(disp_dst3),
-        .rob_id1(rob_id1), .rob_id2(rob_id2), .rob_id3(rob_id3),
         .dado1(disp_dado1), .dado2(disp_dado2), .dado3(disp_dado3),
-        .srid(srid), .saddr(saddr),
         .cv(cv_store),
-        .crob_id1(commit_rob_id1), .crob_id2(commit_rob_id2), .crob_id3(commit_rob_id3),
+        .cr1(commit_r1), .cr2(commit_r2), .cr3(commit_r3),
         .mem_req(sb_mem_req), .mem_addr(sb_mem_addr), .mem_dado(sb_mem_dado),
         .stop(sb_stop)
     );
