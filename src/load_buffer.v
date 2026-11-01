@@ -34,7 +34,10 @@ module load_buffer(
     output wire [31:0] lb_dado1, lb_dado2, lb_dado3,
 
     // Sinal de parada
-    output wire stop
+    output wire stop,
+
+    //IVAN FEATURE: Tail exposto para o ponto de corte dos desvios no despacho
+    output wire [4:0] lb_tail
 );
     // Layout:
     // [37]    → dado_pronto
@@ -99,6 +102,9 @@ module load_buffer(
     assign lb_dado3 = buffer[head3[3:0]][31:0];
 
     assign stop = ((tail - head) > 5'd13);
+
+    //IVAN FEATURE
+    assign lb_tail = tail;
 
     integer i;
     always @(posedge clk) begin
