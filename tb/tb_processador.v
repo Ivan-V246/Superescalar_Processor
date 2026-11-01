@@ -25,6 +25,7 @@ module tb_processador;
     reg [31:0] st_addr [0:255];
     reg [31:0] st_dado [0:255];
     reg        st_ok   [0:255];   // endereco ja calculado pelo caminho
+    reg        st_dok  [0:255];   //IVAN FEATURE: dado ja recebido no envio
     integer st_ini = 0, st_fim = 0, st_cptr = 0;
     integer n_wb, idade_load, idade_store;
     integer n_fwd = 0;            // Loads resolvidos por forwarding
@@ -68,7 +69,8 @@ module tb_processador;
                         if (!st_ok[k]) begin
                             fwd_ok = 1'b0;
                         end else if (st_addr[k] == dut.laddr) begin
-                            fwd_ok = 1'b1; fwd_dado = st_dado[k];
+                            //IVAN FEATURE: sem dado ainda, o Load deveria esperar
+                            fwd_ok = st_dok[k]; fwd_dado = st_dado[k];
                         end
                     end
                 end
@@ -104,19 +106,23 @@ module tb_processador;
             for (k = st_cptr; k < st_fim; k = k + 1) begin
                 if (dut.wb1 && dut.rid1 == st_rob[k]) begin st_addr[k] = dut.r1; st_ok[k] = 1'b1; end
                 if (dut.wb2 && dut.rid2 == st_rob[k]) begin st_addr[k] = dut.r2; st_ok[k] = 1'b1; end
+
+                //IVAN FEATURE: Dado do Store chega no envio
+                if (dut.disp_st1_valid && dut.disp_st1_rob_id == st_rob[k]) begin st_dado[k] = dut.disp_st1_dado; st_dok[k] = 1'b1; end
+                if (dut.disp_st2_valid && dut.disp_st2_rob_id == st_rob[k]) begin st_dado[k] = dut.disp_st2_dado; st_dok[k] = 1'b1; end
             end
 
             // Despacho, na ordem dos slots
             if (dut.disp_v[0] && dut.disp_dst1 == 3'b100) begin
-                st_rob[st_fim] = dut.rob_id1; st_dado[st_fim] = dut.disp_dado1; st_ok[st_fim] = 1'b0;
+                st_rob[st_fim] = dut.rob_id1; st_dado[st_fim] = 32'bx; st_ok[st_fim] = 1'b0; st_dok[st_fim] = 1'b0;  //IVAN FEATURE: dado vem depois
                 st_fim = st_fim + 1;
             end
             if (dut.disp_v[1] && dut.disp_dst2 == 3'b100) begin
-                st_rob[st_fim] = dut.rob_id2; st_dado[st_fim] = dut.disp_dado2; st_ok[st_fim] = 1'b0;
+                st_rob[st_fim] = dut.rob_id2; st_dado[st_fim] = 32'bx; st_ok[st_fim] = 1'b0; st_dok[st_fim] = 1'b0;  //IVAN FEATURE: dado vem depois
                 st_fim = st_fim + 1;
             end
             if (dut.disp_v[2] && dut.disp_dst3 == 3'b100) begin
-                st_rob[st_fim] = dut.rob_id3; st_dado[st_fim] = dut.disp_dado3; st_ok[st_fim] = 1'b0;
+                st_rob[st_fim] = dut.rob_id3; st_dado[st_fim] = 32'bx; st_ok[st_fim] = 1'b0; st_dok[st_fim] = 1'b0;  //IVAN FEATURE: dado vem depois
                 st_fim = st_fim + 1;
             end
         end

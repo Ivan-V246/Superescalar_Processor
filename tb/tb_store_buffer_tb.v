@@ -13,6 +13,11 @@ reg [31:0] r1, r2, r3;
 
 reg [2:0]  cv;
 
+//IVAN FEATURE: dado do Store chega no envio
+reg        store1_valid, store2_valid;
+reg [4:0]  store1_rob_id, store2_rob_id;
+reg [31:0] store1_dado, store2_dado;
+
 reg [4:0]  q_idade;
 reg [31:0] q_addr;
 
@@ -36,6 +41,10 @@ store_buffer U_sb (
     .wb(wb),
     .rid1(rid1), .rid2(rid2), .rid3(rid3),
     .r1(r1), .r2(r2), .r3(r3),
+    //IVAN FEATURE
+    .store1_valid(store1_valid), .store2_valid(store2_valid),
+    .store1_rob_id(store1_rob_id), .store2_rob_id(store2_rob_id),
+    .store1_dado(store1_dado), .store2_dado(store2_dado),
     .cv(cv),
     .sb_tail(sb_tail), .q_idade(q_idade), .q_addr(q_addr), .q_espera(q_espera),
     .q_hit(q_hit), .q_dado(q_dado),
@@ -81,6 +90,17 @@ end
 
 // ─── Tasks ───────────────────────────────────────────────
 
+//IVAN FEATURE: Despacho enviando o dado de um Store já alocado
+task envia_dado;
+    input [4:0]  _rob_id;
+    input [31:0] _dado;
+    begin
+        store1_valid = 1'b1; store1_rob_id = _rob_id; store1_dado = _dado;
+        @(posedge clk); #1;
+        store1_valid = 1'b0;
+    end
+endtask
+
 task despacha;
     input [2:0]  _v;
     input [2:0]  _dst1, _dst2, _dst3;
@@ -92,6 +112,11 @@ task despacha;
         dado1 = _dado1; dado2 = _dado2; dado3 = _dado3;
         @(posedge clk); #1;
         v = 3'b0;
+
+        //IVAN FEATURE: o dado chega depois da alocação, no envio (um Store por ciclo)
+        if (_v[0] && _dst1 == 3'b100) envia_dado(_rob_id1, _dado1);
+        if (_v[1] && _dst2 == 3'b100) envia_dado(_rob_id2, _dado2);
+        if (_v[2] && _dst3 == 3'b100) envia_dado(_rob_id3, _dado3);
     end
 endtask
 
@@ -184,6 +209,10 @@ initial begin
     wb = 3'b0; {rid1,rid2,rid3} = 15'b0; {r1,r2,r3} = 96'b0;
     cv = 3'b0;
     q_idade = 5'd0; q_addr = 32'd0;
+    //IVAN FEATURE
+    store1_valid = 1'b0; store2_valid = 1'b0;
+    store1_rob_id = 5'd0; store2_rob_id = 5'd0;
+    store1_dado = 32'd0; store2_dado = 32'd0;
 
     @(posedge clk); #1;
     rst = 0;
@@ -290,6 +319,23 @@ initial begin
     commita(3'b111);
     ciclos(3);
     checa_vazio("escritas do teste 6b");
+
+    //IVAN FEATURE: Teste 6c: Store que coincide, mas ainda sem dado
+    $display("\n=== TESTE 6c: Store sem dado ===");
+    t0 = sb_tail;
+    v = 3'b001; dst1 = 3'b100; rob_id1 = 5'd1;   // alocação sem envio do dado
+    @(posedge clk); #1;
+    v = 3'b0;
+    resolve(3'b001, 5'd1, 5'd0, 5'd0, 32'h500, 32'd0, 32'd0);
+    consulta(t0 + 1, 32'h500, ESPERA, 0,  "coincide, mas sem dado");
+    store2_valid = 1'b1; store2_rob_id = 5'd1; store2_dado = 32'd66;  // pela porta 2
+    @(posedge clk); #1;
+    store2_valid = 1'b0;
+    consulta(t0 + 1, 32'h500, FWD,    66, "dado chegou pela porta 2");
+    espera_escrita(32'h500, 32'd66);
+    commita(3'b001);
+    ciclos(1);
+    checa_vazio("escrita do teste 6c");
 
     // ── Teste 7: enche até stop, sem commits ──
     $display("\n=== TESTE 7: Enchendo SB ate stop ===");

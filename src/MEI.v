@@ -7,8 +7,15 @@ module MEI #(
     input wire rst,
     input wire [9:0] pc,// na memoria
     output reg [63:0] saida0,          // instrução = [31-0], numero de ordem = [63-32]
-    output reg [63:0] saida1,  
-    output reg [63:0] saida2 
+    output reg [63:0] saida1,
+    output reg [63:0] saida2,
+
+    //IVAN FEATURE: Expõe pcs para controle de fluxo
+    output reg [9:0] pc0, pc1, pc2,
+
+    //IVAN FEATURE: Previsão de desvio de cada slot (sem BTB: sempre não pula)
+    output reg       previu0, previu1, previu2,
+    output reg [9:0] alvo0, alvo1, alvo2
 );
     reg [31:0] memoria [TAMANHO-1:0]; // largura * profundidade
     reg [31:0] contador;      // numero de ordem da primeira palavra do grupo atual
@@ -37,6 +44,16 @@ module MEI #(
             saida0   <= 64'b0;
             saida1   <= 64'b0;
             saida2   <= 64'b0;
+
+            //IVAN FEATURE:
+            pc0 <= 10'b0;
+            pc1 <= 10'b0;
+            pc2 <= 10'b0;
+
+            //IVAN FEATURE:
+            previu0 <= 1'b0; previu1 <= 1'b0; previu2 <= 1'b0;
+            alvo0   <= 10'b0; alvo1  <= 10'b0; alvo2  <= 10'b0;
+
         end else begin
             pc_ant <= pc;
 
@@ -45,6 +62,15 @@ module MEI #(
                 saida1 <= {fio1, memoria[(pc >> 2) + 10'b1]};
                 saida2 <= {fio2, memoria[(pc >> 2) + 10'b10]};
                 contador <= fio3;
+
+                //IVAN FEATURE:
+                pc0 <= pc;
+                pc1 <= pc+4;
+                pc2 <= pc+8;
+
+                //IVAN FEATURE: Sem BTB, a busca segue em pc + 12 (previsão: não pula)
+                previu0 <= 1'b0; previu1 <= 1'b0; previu2 <= 1'b0;
+                alvo0   <= 10'b0; alvo1  <= 10'b0; alvo2  <= 10'b0;
             end
         end
     end

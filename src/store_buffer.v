@@ -12,6 +12,12 @@ module store_buffer(
     input wire [4:0]  rid1, rid2, rid3,          // Rob id das resoluções
     input wire [31:0] r1, r2, r3,                // Resultados (endereço, no caso do Store)
 
+    //IVAN FEATURE: Dado do Store chega no envio, identificado pelo rob_id
+    //(dado1..3 da alocação deixam de ser usados)
+    input wire        store1_valid, store2_valid,
+    input wire [4:0]  store1_rob_id, store2_rob_id,
+    input wire [31:0] store1_dado, store2_dado,
+
     // Commit do ROB — até 3 stores por ciclo, sempre em ordem
     input wire [2:0]  cv,                        // Quais commits são Store
 
@@ -41,6 +47,7 @@ module store_buffer(
     reg [31:0] addr    [0:15];
     reg        addr_ok [0:15];
     reg [4:0]  rob_id  [0:15];
+    reg        dado_ok [0:15];   //IVAN FEATURE: dado já recebido do despacho
     reg [4:0] head, cptr, tail;
 
     wire [4:0] tail2 = tail + 1;
@@ -83,9 +90,15 @@ module store_buffer(
                 if (!addr_ok[ptr[3:0]]) begin
                     q_espera = 1'b1;
                 end else if (addr[ptr[3:0]] == q_addr) begin
-                    q_hit    = 1'b1;
-                    q_espera = 1'b0;
-                    q_dado   = dado[ptr[3:0]];
+                    //IVAN FEATURE: Store que coincide sem dado ainda: o Load espera
+                    if (dado_ok[ptr[3:0]]) begin
+                        q_hit    = 1'b1;
+                        q_espera = 1'b0;
+                        q_dado   = dado[ptr[3:0]];
+                    end else begin
+                        q_hit    = 1'b0;
+                        q_espera = 1'b1;
+                    end
                 end
             end
         end
@@ -107,6 +120,7 @@ module store_buffer(
                 addr[i]    <= 32'b0;
                 addr_ok[i] <= 1'b0;
                 rob_id[i]  <= 5'b0;
+                dado_ok[i] <= 1'b0;  //IVAN FEATURE
             end
         end else begin
             tail <= tail + dispatched;
@@ -141,6 +155,11 @@ module store_buffer(
                 end
             endcase
 
+            //IVAN FEATURE: Entradas alocadas começam sem dado
+            if (dispatched >= 3'd1) dado_ok[tail[3:0]]  <= 1'b0;
+            if (dispatched >= 3'd2) dado_ok[tail2[3:0]] <= 1'b0;
+            if (dispatched == 3'd3) dado_ok[tail3[3:0]] <= 1'b0;
+
             // Captura do endereço calculado pelos caminhos
             for (i = 0; i < 16; i = i + 1) begin
                 off = i[4:0] - cptr;
@@ -148,6 +167,10 @@ module store_buffer(
                     if (wb[0] && rid1 == rob_id[i]) begin addr[i] <= r1; addr_ok[i] <= 1'b1; end
                     if (wb[1] && rid2 == rob_id[i]) begin addr[i] <= r2; addr_ok[i] <= 1'b1; end
                     if (wb[2] && rid3 == rob_id[i]) begin addr[i] <= r3; addr_ok[i] <= 1'b1; end
+
+                    //IVAN FEATURE: Captura do dado enviado pelo despacho
+                    if (store1_valid && store1_rob_id == rob_id[i]) begin dado[i] <= store1_dado; dado_ok[i] <= 1'b1; end
+                    if (store2_valid && store2_rob_id == rob_id[i]) begin dado[i] <= store2_dado; dado_ok[i] <= 1'b1; end
                 end
             end
 

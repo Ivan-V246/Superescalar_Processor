@@ -21,13 +21,23 @@ module processador (input clk, input rst);
     wire [63:0] mei_saida1;
     wire [63:0] mei_saida2;
 
+    //IVAN FEATURE: PC e previsão de cada slot da busca
+    wire [9:0] mei_pc0, mei_pc1, mei_pc2;
+    wire       mei_previu0, mei_previu1, mei_previu2;
+    wire [9:0] mei_alvo0, mei_alvo1, mei_alvo2;
+
     MEI mei (
         .clk(clk),
         .rst(rst),
         .pc(pc),
         .saida0(mei_saida0),
         .saida1(mei_saida1),
-        .saida2(mei_saida2)
+        .saida2(mei_saida2),
+
+        //IVAN FEATURE
+        .pc0(mei_pc0), .pc1(mei_pc1), .pc2(mei_pc2),
+        .previu0(mei_previu0), .previu1(mei_previu1), .previu2(mei_previu2),
+        .alvo0(mei_alvo0), .alvo1(mei_alvo1), .alvo2(mei_alvo2)
     );
 
     // ---- fios entre despacho, banco e caminhos ----
@@ -80,6 +90,13 @@ module processador (input clk, input rst);
     wire        load_grant;
     wire [31:0] wdado1, wdado2, wdado3;
 
+    //IVAN FEATURE: Alocação na entrada da fila e envio com o rob_id reservado
+    wire [4:0]  p1_rob_id, p2_rob_id;            // despacho → caminho: rob_id reservado na alocação
+    wire [4:0]  lb_tail;                         // load buffer → despacho: ponto de corte
+    wire        disp_st1_valid, disp_st2_valid;  // despacho → store buffer: dado do Store no envio
+    wire [4:0]  disp_st1_rob_id, disp_st2_rob_id;
+    wire [31:0] disp_st1_dado, disp_st2_dado;
+
     // ---- despacho ----
     despacho desp (
         .clk(clk),
@@ -115,7 +132,26 @@ module processador (input clk, input rst);
         .path1_rs1_addr(p1_rs1),       .path1_rs2_addr(p1_rs2),
         .path2_rs1_addr(p2_rs1),       .path2_rs2_addr(p2_rs2),
         .path1_rs1_data(p1_rs1_val),   .path1_rs2_data(p1_rs2_val),
-        .path2_rs1_data(p2_rs1_val),   .path2_rs2_data(p2_rs2_val)
+        .path2_rs1_data(p2_rs1_val),   .path2_rs2_data(p2_rs2_val),
+
+        //IVAN FEATURE: PC e previsão (os caminhos ainda não os recebem)
+        .mei_pc0(mei_pc0), .mei_pc1(mei_pc1), .mei_pc2(mei_pc2),
+        .path1_pc(),       .path2_pc(),
+        .mei_previu0(mei_previu0), .mei_previu1(mei_previu1), .mei_previu2(mei_previu2),
+        .mei_alvo0(mei_alvo0),     .mei_alvo1(mei_alvo1),     .mei_alvo2(mei_alvo2),
+        .path1_previu(),   .path2_previu(),
+        .path1_alvo(),     .path2_alvo(),
+
+        //IVAN FEATURE: Alocação na entrada da fila
+        .sb_tail(sb_tail), .lb_tail(lb_tail),
+        .path1_rob_id(p1_rob_id), .path2_rob_id(p2_rob_id),
+        .path1_sb_tail(), .path2_sb_tail(),
+        .path1_lb_tail(), .path2_lb_tail(),
+
+        //IVAN FEATURE: Dado do Store no envio
+        .store1_valid(disp_st1_valid),   .store2_valid(disp_st2_valid),
+        .store1_rob_id(disp_st1_rob_id), .store2_rob_id(disp_st2_rob_id),
+        .store1_dado(disp_st1_dado),     .store2_dado(disp_st2_dado)
     );
 
     // ---- decide quais commits escrevem no banco ----
@@ -160,7 +196,7 @@ module processador (input clk, input rst);
         .valido(p1_valid),
         .instr(p1_instr),
         .valor_rs1(p1_rs1_val), .valor_rs2(p1_rs2_val),
-        .rob_id(rob_id1),
+        .rob_id(p1_rob_id),     //IVAN FEATURE: rob_id do envio, não da alocação
         .ready(p1_ready),
         .wb(wb1), .rid(rid1), .r(r1)
     );
@@ -170,7 +206,7 @@ module processador (input clk, input rst);
         .valido(p2_valid),
         .instr(p2_instr),
         .valor_rs1(p2_rs1_val), .valor_rs2(p2_rs2_val),
-        .rob_id(rob_id2),
+        .rob_id(p2_rob_id),     //IVAN FEATURE: rob_id do envio, não da alocação
         .ready(p2_ready),
         .wb(wb2), .rid(rid2), .r(r2)
     );
@@ -215,6 +251,10 @@ module processador (input clk, input rst);
         .wb({1'b0, wb2, wb1}),
         .rid1(rid1), .rid2(rid2), .rid3(5'd0),
         .r1(r1),     .r2(r2),     .r3(32'd0),
+        //IVAN FEATURE: dado do Store, vindo do envio
+        .store1_valid(disp_st1_valid),   .store2_valid(disp_st2_valid),
+        .store1_rob_id(disp_st1_rob_id), .store2_rob_id(disp_st2_rob_id),
+        .store1_dado(disp_st1_dado),     .store2_dado(disp_st2_dado),
         .cv(cv_store),
         // consulta do load buffer
         .sb_tail(sb_tail), .q_idade(lb_q_idade), .q_addr(laddr),
@@ -236,7 +276,8 @@ module processador (input clk, input rst);
         .cv(cv_load),
         .crob_id1(commit_rob_id1), .crob_id2(commit_rob_id2), .crob_id3(commit_rob_id3),
         .lb_dado1(lb_dado1), .lb_dado2(lb_dado2), .lb_dado3(lb_dado3),
-        .stop(lb_stop)
+        .stop(lb_stop),
+        .lb_tail(lb_tail)   //IVAN FEATURE
     );
 
     assign load_grant = lb_mem_req & !sb_mem_req;
