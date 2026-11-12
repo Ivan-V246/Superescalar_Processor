@@ -67,7 +67,14 @@ module despacho(
     //IVAN FEATURE: Dado do Store enviado no despacho (dado1..3 deixam de ser usados)
     output reg        store1_valid, store2_valid,
     output reg  [4:0] store1_rob_id, store2_rob_id,
-    output reg [31:0] store1_dado, store2_dado
+    output reg [31:0] store1_dado, store2_dado,
+
+    //Hazard: o despacho informa as duas instruções da frente e recebe se pode enviá-las
+    output wire [4:0] h_rs1_0, h_rs2_0, h_rs1_1, h_rs2_1,  //registradores que cada uma lê
+    output wire [4:0] h_rd0, h_rd1,                        //registrador que cada uma escreve
+    output wire       h_escreve0, h_escreve1,              //1 se escreve em registrador (ALU ou load)
+    output wire       h_alu0, h_alu1,                      //1 se é de ALU (o resultado sai do caminho)
+    input  wire       hazard0, hazard1                     //1 = não pode enviar ainda
 
 );
     //Renomeação do sinal enviado pelo ROB
@@ -165,6 +172,14 @@ module despacho(
     decoder decE2 (.instr(mei_instr2),.instr_valid(),.dst(ent_dst2),.rs1(),.rs2(),
         .rd(ent_rd2),.alu_op(),.mem_funct3());
 
+    //Instruções da frente para o hazard_forwarding (a decodificação já existia, só expõe)
+    assign h_rs1_0 = dec_rs1_0;  assign h_rs2_0 = dec_rs2_0;  assign h_rd0 = dec_rd0;
+    assign h_rs1_1 = dec_rs1_1;  assign h_rs2_1 = dec_rs2_1;  assign h_rd1 = dec_rd1;
+    assign h_escreve0 = dec_valid0 && (dec_dst0 == DST_REG || dec_dst0 == DST_LOAD);
+    assign h_escreve1 = dec_valid1 && (dec_dst1 == DST_REG || dec_dst1 == DST_LOAD);
+    assign h_alu0 = (dec_dst0 == DST_REG);
+    assign h_alu1 = (dec_dst1 == DST_REG);
+
     //Decodificação das instruções mais antigas
     decoder dec0 (.instr(instr0),.instr_valid(dec_valid0),.dst(dec_dst0),.rs1(dec_rs1_0),.rs2(dec_rs2_0),
         .rd(dec_rd0),.alu_op(dec_alu_op0),.mem_funct3(dec_mem_funct3_0));
@@ -247,9 +262,10 @@ module despacho(
         //Confere se as instruçoes respeitam os bloqueios
         //IVAN FEATURE: Sem bloqueio por ROB/buffers aqui: a instrução já foi alocada.
         //Bloquear o envio por ROB cheio travaria o processador (ROB cheio de quem espera o envio)
-        can_send0 = (count >= 5'd1) && dec_valid0 && path1_ready;
+        //!hazard0 / !hazard1: não envia quem lê um valor que ainda não foi calculado
+        can_send0 = (count >= 5'd1) && dec_valid0 && path1_ready && !hazard0;
 
-        can_send1 = (count >= 5'd2)&& dec_valid1 && path2_ready;
+        can_send1 = (count >= 5'd2)&& dec_valid1 && path2_ready && !hazard1;
 
         //Envia a primeira
         if (can_send0) begin

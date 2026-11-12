@@ -97,6 +97,15 @@ module processador (input clk, input rst);
     wire [4:0]  disp_st1_rob_id, disp_st2_rob_id;
     wire [31:0] disp_st1_dado, disp_st2_dado;
 
+    //Hazard e forwarding
+    wire [4:0]  h_rs1_0, h_rs2_0, h_rs1_1, h_rs2_1;   //despacho -> hazard: o que as instruções da frente leem
+    wire [4:0]  h_rd0, h_rd1;                         //e o que escrevem
+    wire        h_escreve0, h_escreve1, h_alu0, h_alu1;
+    wire        hazard0, hazard1;                     //hazard -> despacho: segura ou não
+    wire [31:0] banco_p1_rs1, banco_p1_rs2;           //valor lido no banco (pode estar velho)
+    wire [31:0] banco_p2_rs1, banco_p2_rs2;
+    wire [31:0] lb_dado_pronto;                       //dado do load que acabou de ficar pronto
+
     // ---- despacho ----
     despacho desp (
         .clk(clk),
@@ -151,7 +160,14 @@ module processador (input clk, input rst);
         //IVAN FEATURE: Dado do Store no envio
         .store1_valid(disp_st1_valid),   .store2_valid(disp_st2_valid),
         .store1_rob_id(disp_st1_rob_id), .store2_rob_id(disp_st2_rob_id),
-        .store1_dado(disp_st1_dado),     .store2_dado(disp_st2_dado)
+        .store1_dado(disp_st1_dado),     .store2_dado(disp_st2_dado),
+
+        //Hazard
+        .h_rs1_0(h_rs1_0), .h_rs2_0(h_rs2_0), .h_rs1_1(h_rs1_1), .h_rs2_1(h_rs2_1),
+        .h_rd0(h_rd0), .h_rd1(h_rd1),
+        .h_escreve0(h_escreve0), .h_escreve1(h_escreve1),
+        .h_alu0(h_alu0), .h_alu1(h_alu1),
+        .hazard0(hazard0), .hazard1(hazard1)
     );
 
     // ---- decide quais commits escrevem no banco ----
@@ -173,6 +189,34 @@ module processador (input clk, input rst);
     assign cv_store[1] = (commit_dst2 == 3'b100);
     assign cv_store[2] = (commit_dst3 == 3'b100);
 
+    // ---- hazard e forwarding ----
+    //O load termina de dois jeitos: lendo a memória (lb_mem_done = 1) ou pegando o dado
+    //direto do store buffer (forwarding de store). Aqui escolhe qual dos dois chegou.
+    assign lb_dado_pronto = lb_mem_done ? lb_mem_data : sb_q_dado;
+
+    //O banco agora entrega os valores para o hazard_forwarding (banco_p*), e é ele que
+    //entrega o valor certo para os caminhos e o despacho (p1_rs1_val etc.)
+    hazard_forwarding hz (
+        .clk(clk), .rst(rst),
+        .rs1_0(h_rs1_0), .rs2_0(h_rs2_0), .rs1_1(h_rs1_1), .rs2_1(h_rs2_1),
+        .rd0(h_rd0), .rd1(h_rd1),
+        .escreve0(h_escreve0), .escreve1(h_escreve1),
+        .alu0(h_alu0), .alu1(h_alu1),
+        .hazard0(hazard0), .hazard1(hazard1),
+        .env1(p1_valid), .env2(p2_valid),
+        .env_rob1(p1_rob_id), .env_rob2(p2_rob_id),
+        .wb1(wb1), .wb2(wb2), .rid1(rid1), .rid2(rid2), .r1(r1), .r2(r2),
+        .lb_done(lb_done), .lb_rid(lb_rid), .lb_dado(lb_dado_pronto),
+        .we(we_banco),
+        .crd1(commit_rd1), .crd2(commit_rd2), .crd3(commit_rd3),
+        .crob_id1(commit_rob_id1), .crob_id2(commit_rob_id2), .crob_id3(commit_rob_id3),
+        .p1_rs1(p1_rs1), .p1_rs2(p1_rs2), .p2_rs1(p2_rs1), .p2_rs2(p2_rs2),
+        .banco_p1_rs1(banco_p1_rs1), .banco_p1_rs2(banco_p1_rs2),
+        .banco_p2_rs1(banco_p2_rs1), .banco_p2_rs2(banco_p2_rs2),
+        .p1_rs1_val(p1_rs1_val), .p1_rs2_val(p1_rs2_val),
+        .p2_rs1_val(p2_rs1_val), .p2_rs2_val(p2_rs2_val)
+    );
+
     // ---- banco de registradores ----
     banco_registradores banco (
         .clk(clk), .rst(rst),
@@ -181,8 +225,8 @@ module processador (input clk, input rst);
         .rs1_1(p1_rs1),     .rs2_1(p1_rs2),
         .rs1_2(p2_rs1),     .rs2_2(p2_rs2),
         .rs1_3(5'd0),       .rs2_3(5'd0),                            // 3ª porta não usada
-        .valor_rs1_1(p1_rs1_val), .valor_rs2_1(p1_rs2_val),
-        .valor_rs1_2(p2_rs1_val), .valor_rs2_2(p2_rs2_val),
+        .valor_rs1_1(banco_p1_rs1), .valor_rs2_1(banco_p1_rs2),
+        .valor_rs1_2(banco_p2_rs1), .valor_rs2_2(banco_p2_rs2),
         .valor_rs1_3(),           .valor_rs2_3(),
 
         .we(we_banco),
