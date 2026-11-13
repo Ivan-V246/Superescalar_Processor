@@ -8,12 +8,21 @@ module caminho (
     input  wire [31:0] valor_rs1,
     input  wire [31:0] valor_rs2,
     input  wire [4:0]  rob_id,
+    input  wire [9:0]  pc,
+    input  wire        previu,
+    input  wire [9:0]  alvo_previsto,
     output wire        ready,
 
     // ROB
     output reg         wb,
     output reg  [4:0]  rid,
-    output reg  [31:0] r            // valor de rd ou endereco (load/store)
+    output reg  [31:0] r,           // valor de rd ou endereco (load/store)
+
+    // Busca e despacho
+    output reg         resolvido,   // instrucao de salto resolvida
+    output reg         tomado,      // fluxo muda
+    output reg  [9:0]  alvo,        // proximo pc
+    output reg         errou        // previsao errada
 );
     // Campos da instrucao (IF_ID.v)
     wire [6:0]  opcode = instr[6:0];
@@ -173,13 +182,13 @@ module caminho (
         endcase
     end
 
-    // Operandos da ULA (sem pc: alu_src1 = 01 vira zero)
+    // Operandos da ULA
     reg [31:0] ULA_A, ULA_B;
 
     always @(*) begin
         case (alu_src1)
             2'b00: ULA_A = valor_rs1;
-            2'b01: ULA_A = 32'b0;
+            2'b01: ULA_A = {22'b0, pc};
             2'b10: ULA_A = 32'b0;
             default: ULA_A = valor_rs1;
         endcase
@@ -272,18 +281,63 @@ module caminho (
         end
     end
 
-    // Resolucao para o ROB (1 ciclo apos o envio)
+    // Branch decider (Branch_Decider.v)
+    reg cond;
+
+    always @(*) begin
+        cond = 1'b0;
+        if (branch) begin
+            case (funct3)
+                3'b000: cond = (valor_rs1 == valor_rs2);                   // beq
+                3'b001: cond = (valor_rs1 != valor_rs2);                   // bne
+                3'b100: cond = ($signed(valor_rs1) <  $signed(valor_rs2)); // blt
+                3'b101: cond = ($signed(valor_rs1) >= $signed(valor_rs2)); // bge
+                3'b110: cond = (valor_rs1 <  valor_rs2);                   // bltu
+                3'b111: cond = (valor_rs1 >= valor_rs2);                   // bgeu
+                default: cond = 1'b0;
+            endcase
+        end
+    end
+
+    // Imediatos dos saltos
+    wire [31:0] imm_i32 = {{20{imm_I[11]}}, imm_I};
+    wire [31:0] imm_b32 = {{19{imm_B[11]}}, imm_B, 1'b0};
+    wire [31:0] imm_j32 = {{11{imm_J[19]}}, imm_J, 1'b0};
+
+    // Enderecos
+    wire [31:0] pc32      = {22'b0, pc};
+    wire [31:0] pc_mais_4 = pc32 + 32'd4;
+    wire [31:0] alvo_jalr = (valor_rs1 + imm_i32) & ~32'd1;
+    wire [31:0] alvo_jal  = pc32 + imm_j32;
+    wire [31:0] alvo_br   = pc32 + imm_b32;
+
+    // Proximo pc
+    wire        eh_salto = branch | jump;
+    wire        muda     = jump | (branch & cond);
+    wire [31:0] prox     = jalr ? alvo_jalr :
+                           jump ? alvo_jal  :
+                           muda ? alvo_br   : pc_mais_4;
+
+    // Resolucao (1 ciclo apos o envio)
     assign ready = 1'b1;
 
     always @(posedge clk) begin
         if (rst) begin
-            wb  <= 1'b0;
-            rid <= 5'b0;
-            r   <= 32'b0;
+            wb        <= 1'b0;
+            rid       <= 5'b0;
+            r         <= 32'b0;
+            resolvido <= 1'b0;
+            tomado    <= 1'b0;
+            alvo      <= 10'b0;
+            errou     <= 1'b0;
         end else begin
-            wb  <= valido;
-            rid <= rob_id;
-            r   <= C;
+            wb        <= valido;
+            rid       <= rob_id;
+            r         <= C;
+            resolvido <= valido & eh_salto;
+            tomado    <= valido & muda;
+            alvo      <= prox[9:0];
+            errou     <= valido & eh_salto & ((muda != previu) | (muda & (prox[9:0] != alvo_previsto)));
         end
     end
 endmodule

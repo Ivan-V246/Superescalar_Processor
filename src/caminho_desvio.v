@@ -9,6 +9,8 @@ module caminho_desvio (
     input  wire [31:0] valor_rs1,
     input  wire [31:0] valor_rs2,
     input  wire [4:0]  rob_id,
+    input  wire        previu,
+    input  wire [9:0]  alvo_previsto,
     output wire        ready,
 
     // ROB
@@ -19,7 +21,8 @@ module caminho_desvio (
     // Busca e despacho
     output reg         resolvido,   // instrucao resolvida
     output reg         tomado,      // fluxo muda
-    output reg  [9:0]  alvo         // proximo pc
+    output reg  [9:0]  alvo,        // proximo pc
+    output reg         errou        // previsao errada
 );
     // Campos da instrucao
     wire [6:0]  opcode = instr[6:0];
@@ -80,6 +83,7 @@ module caminho_desvio (
             resolvido <= 1'b0;
             tomado    <= 1'b0;
             alvo      <= 10'b0;
+            errou     <= 1'b0;
         end else begin
             wb        <= valido;
             rid       <= rob_id;
@@ -87,6 +91,7 @@ module caminho_desvio (
             resolvido <= valido;
             tomado    <= valido & muda;
             alvo      <= prox[9:0];
+            errou     <= valido & ((muda != previu) | (muda & (prox[9:0] != alvo_previsto)));
         end
     end
 endmodule
