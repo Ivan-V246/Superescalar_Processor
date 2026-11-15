@@ -324,7 +324,10 @@ module processador (input clk, input rst);
         .crob_id1(commit_rob_id1), .crob_id2(commit_rob_id2), .crob_id3(commit_rob_id3),
         .lb_dado1(lb_dado1), .lb_dado2(lb_dado2), .lb_dado3(lb_dado3),
         .stop(lb_stop),
-        .lb_tail(lb_tail)   //IVAN FEATURE
+        .lb_tail(lb_tail),  //IVAN FEATURE
+
+        //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
+        .flush_ok(1'b0), .flush_rob_id(5'd0), .rob_head(5'd0)
     );
 
     assign load_grant = lb_mem_req & !sb_mem_req;

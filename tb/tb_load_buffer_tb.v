@@ -14,6 +14,11 @@ reg [2:0]  cv;
 
 reg [4:0]  sb_tail;
 reg        q_espera;
+
+//IVAN FEATURE: recuperação
+reg        flush_ok;
+reg  [4:0] flush_rob_id, rob_head;
+reg  [4:0] p0;
 reg        q_hit;
 reg [31:0] q_dado;
 wire [4:0] q_idade;
@@ -36,6 +41,7 @@ load_buffer U_lb (
     .lrid(lrid), .lready(lready),
     .sb_tail(sb_tail), .q_idade(q_idade), .q_espera(q_espera),
     .q_hit(q_hit), .q_dado(q_dado),
+    .flush_ok(flush_ok), .flush_rob_id(flush_rob_id), .rob_head(rob_head),  //IVAN FEATURE
     .mem_req(mem_req), .mem_data(mem_data), .mem_done(mem_done),
     .lb_done(lb_done), .lb_rid(lb_rid),
     .cv(cv), .crob_id1(crob_id1), .crob_id2(crob_id2), .crob_id3(crob_id3),
@@ -156,6 +162,7 @@ initial begin
     lready = 0; mem_data = 32'b0; mem_done = 0;
     cv = 3'b0; {crob_id1,crob_id2,crob_id3} = 15'b0;
     sb_tail = 5'd0; q_espera = 1'b0; q_hit = 1'b0; q_dado = 32'd0;
+    flush_ok = 1'b0; flush_rob_id = 5'd0; rob_head = 5'd0;  //IVAN FEATURE
     @(posedge clk); #1;
     rst = 0;
 
@@ -267,6 +274,73 @@ initial begin
     checa(lb_dado1 === 32'd777 && lb_dado2 === 32'd888, "dados no commit: forwarding e memoria");
     @(posedge clk); #1;
     cv = 3'b0;
+
+    //IVAN FEATURE: Teste 4d: recuperação (flush de desvio)
+    // rob_head = 10; Loads por rob_id; B é o desvio que errou
+    $display("\n=== TESTE 4d: recuperacao ===");
+    rob_head = 5'd10;
+    p0 = U_lb.head;
+    despacha(3'b011, 3'b010, 3'b010, 3'b000, 5'd11, 5'd13, 5'd0);
+    despacha(3'b011, 3'b010, 3'b010, 3'b000, 5'd15, 5'd17, 5'd0);
+    executa_load(32'h100, 32'd111, 0, 1);                   // Load 11 termina
+
+    // Flush com B = 14: mantém 11 e 13, descarta 15 e 17; alocação do ciclo ignorada
+    flush_ok = 1; flush_rob_id = 5'd14;
+    v = 3'b001; dst1 = 3'b010; rob_id1 = 5'd25;
+    @(posedge clk); #1;
+    flush_ok = 0; v = 3'b0;
+    checa(U_lb.tail === p0 + 5'd2, "corte: tail depois dos Loads 11 e 13");
+    checa(U_lb.mem_ptr === p0 + 5'd1, "mem_ptr mantido (antes do corte)");
+
+    // mem_ptr além do corte volta para o novo tail
+    executa_load(32'h104, 32'd113, 0, 1);                   // Load 13 termina
+    despacha(3'b011, 3'b010, 3'b010, 3'b000, 5'd18, 5'd19, 5'd0);
+    executa_load(32'h108, 32'd118, 0, 1);                   // Load 18 termina (descartado depois)
+    flush_ok = 1; flush_rob_id = 5'd17;
+    @(posedge clk); #1;
+    flush_ok = 0;
+    checa(U_lb.tail === p0 + 5'd2 && U_lb.mem_ptr === p0 + 5'd2, "mem_ptr alem do corte volta ao tail");
+
+    // Resposta da memória de um Load descartado é ignorada
+    despacha(3'b001, 3'b010, 3'b000, 3'b000, 5'd20, 5'd0, 5'd0);
+    lready = 1; #1;
+    checa(mem_req === 1'b1, "Load 20 pede a memoria");
+    flush_ok = 1; flush_rob_id = 5'd19;
+    @(posedge clk); #1;
+    flush_ok = 0;
+    mem_data = 32'd999; mem_done = 1; #1;
+    checa(lb_done === 1'b0, "resposta do Load descartado ignorada");
+    @(posedge clk); #1;
+    mem_done = 0; lready = 0;
+    checa(U_lb.mem_ptr === p0 + 5'd2 && U_lb.tail === p0 + 5'd2, "mem_ptr e tail no corte");
+    checa(U_lb.descarta_resposta === 1'b0, "descarte vale so um ciclo");
+
+    // Load descartado terminando por forwarding no ciclo do flush
+    despacha(3'b001, 3'b010, 3'b000, 3'b000, 5'd21, 5'd0, 5'd0);
+    lready = 1; q_hit = 1; q_dado = 32'd777;
+    flush_ok = 1; flush_rob_id = 5'd20;
+    @(posedge clk); #1;
+    flush_ok = 0; q_hit = 0; lready = 0;
+    checa(U_lb.mem_ptr === p0 + 5'd2 && U_lb.tail === p0 + 5'd2, "fwd do descartado nao avanca mem_ptr");
+
+    // Load antigo terminando pela memória no ciclo do flush segue normalmente
+    despacha(3'b011, 3'b010, 3'b010, 3'b000, 5'd22, 5'd24, 5'd0);
+    lready = 1;
+    @(posedge clk); #1;                                     // Load 22 pede a memória
+    mem_data = 32'd55; mem_done = 1;
+    flush_ok = 1; flush_rob_id = 5'd23;                     // 22 é mais antigo, 24 mais novo
+    #1;
+    checa(lb_done === 1'b1 && lb_rid === 5'd22, "Load antigo termina no ciclo do flush");
+    @(posedge clk); #1;
+    mem_done = 0; flush_ok = 0; lready = 0;
+    checa(U_lb.mem_ptr === p0 + 5'd3 && U_lb.tail === p0 + 5'd3, "mantem 22, descarta 24");
+    p0 = p0 + 5'd2;  // posição do Load 22 (o buffer usa só os 4 bits de baixo)
+    checa(U_lb.buffer[p0[3:0]][31:0] === 32'd55, "dado do Load antigo gravado");
+
+    // Esvazia: commit de 11, 13 e 22
+    commita(3'b111, 5'd11, 5'd13, 5'd22);
+    checa(U_lb.head === U_lb.tail, "Loads mantidos aposentados");
+    rob_head = 5'd0;
 
     // ── Teste 5: Enche até stop ──
     $display("\n=== TESTE 5: Enchendo LB ate stop ===");

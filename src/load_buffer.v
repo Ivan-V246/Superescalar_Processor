@@ -37,7 +37,12 @@ module load_buffer(
     output wire stop,
 
     //IVAN FEATURE: Tail exposto para o ponto de corte dos desvios no despacho
-    output wire [4:0] lb_tail
+    output wire [4:0] lb_tail,
+
+    //IVAN FEATURE: Recuperação de desvio (aviso do ROB)
+    input  wire       flush_ok,       //Desvio B errou e ainda está no ROB
+    input  wire [4:0] flush_rob_id,   //rob_id de B
+    input  wire [4:0] rob_head        //Head do ROB: referência de idade
 );
     // Layout:
     // [37]    → dado_pronto
@@ -84,13 +89,39 @@ module load_buffer(
     assign lrid    = buffer[mem_ptr[3:0]][36:32];
     assign q_idade = idade[mem_ptr[3:0]];
 
+    //IVAN FEATURE: Recuperação
+    //Todas as entradas ainda não fizeram commit e estão na ordem do programa, então as
+    //mais antigas que B formam o início da fila: o novo tail é head + n_mantidos.
+    //Uma entrada é mais antiga que B se está mais perto do head do ROB que B.
+    reg        descarta_resposta;    //Ignora o mem_done do ciclo seguinte (Load descartado)
+    wire       mem_done_ok = mem_done & !descarta_resposta;
+
+    wire [4:0] dist_B      = flush_rob_id - rob_head;
+    wire [4:0] ocupadas_lb = tail - head;
+    reg  [4:0] n_mantidos;
+    reg  [4:0] pos_k, dist_k, mem_prox;
+    integer k;
+
+    always @(*) begin
+        n_mantidos = 5'd0;
+        for (k = 0; k < 16; k = k + 1) begin
+            pos_k  = head + k;
+            dist_k = buffer[pos_k[3:0]][36:32] - rob_head;
+            if (k < ocupadas_lb && dist_k < dist_B)
+                n_mantidos = n_mantidos + 5'd1;
+        end
+    end
+
+    wire [4:0] tail_flush = head + n_mantidos;
+
     // O Load em mem_ptr termina pela memória (um ciclo depois do mem_req)
     // ou por forwarding (no mesmo ciclo da consulta)
-    wire pronto = lready & !q_espera & (mem_ptr != tail) & !mem_done;
+    //IVAN FEATURE: mem_done_ok no lugar de mem_done (resposta de Load descartado não conta)
+    wire pronto = lready & !q_espera & (mem_ptr != tail) & !mem_done_ok;
     wire fwd    = pronto & q_hit;
     assign mem_req = pronto & !q_hit;
 
-    wire        termina   = mem_done | fwd;
+    wire        termina   = mem_done_ok | fwd;
     wire [31:0] dado_lido = fwd ? q_dado : mem_data;
 
     // mem_ptr só avança quando o Load termina, então ele ainda aponta para esse Load
@@ -112,15 +143,27 @@ module load_buffer(
             head         <= 5'd0;
             mem_ptr      <= 5'd0;
             tail         <= 5'd0;
+            descarta_resposta <= 1'b0;  //IVAN FEATURE
             for (i = 0; i < 16; i = i + 1) begin
                 buffer[i] <= 38'b0;
                 idade[i]  <= 5'b0;
             end
         end else begin
-            tail <= tail + dispatched;
             head <= head + aposentados;
 
+            //IVAN FEATURE: No flush, o tail volta para depois do último Load mais antigo
+            //que B, e as alocações do ciclo (caminho errado) são ignoradas
+            if (flush_ok)
+                tail <= tail_flush;
+            else
+                tail <= tail + dispatched;
+
+            //IVAN FEATURE: Se o Load em mem_ptr foi descartado e pediu a memória neste
+            //ciclo, a resposta que chega no próximo ciclo é ignorada (vale só um ciclo)
+            descarta_resposta <= flush_ok && mem_req && ((mem_ptr - head) >= n_mantidos);
+
             // Despacho compactado
+            if (!flush_ok)  //IVAN FEATURE
             case({is_load1, is_load2, is_load3})
                 3'b001: begin
                     buffer[tail[3:0]]  <= {1'b0, rob_id3, 32'b0}; idade[tail[3:0]]  <= idade3;
@@ -154,6 +197,14 @@ module load_buffer(
                 buffer[mem_ptr[3:0]][31:0] <= dado_lido;
                 buffer[mem_ptr[3:0]][37]   <= 1'b1;
                 mem_ptr <= mem_ptr + 1;
+            end
+
+            //IVAN FEATURE: Se o mem_ptr (depois do avanço deste ciclo) passou do corte,
+            //volta para o novo tail. Fica por último para vencer o avanço.
+            if (flush_ok) begin
+                mem_prox = termina ? mem_ptr + 5'd1 : mem_ptr;
+                if ((mem_prox - head) > n_mantidos)
+                    mem_ptr <= tail_flush;
             end
         end
     end
