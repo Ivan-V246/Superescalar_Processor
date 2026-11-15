@@ -21,6 +21,11 @@ reg [31:0] store1_dado, store2_dado;
 reg [4:0]  q_idade;
 reg [31:0] q_addr;
 
+//IVAN FEATURE: recuperação
+reg        flush_ok;
+reg  [4:0] flush_rob_id, rob_head;
+reg  [4:0] p;
+
 wire [4:0]  sb_tail;
 wire        q_espera;
 wire        q_hit;
@@ -51,7 +56,8 @@ store_buffer U_sb (
     .mem_req(mem_req),
     .mem_addr(mem_addr),
     .mem_dado(mem_dado),
-    .stop(stop)
+    .stop(stop),
+    .flush_ok(flush_ok), .flush_rob_id(flush_rob_id), .rob_head(rob_head)  //IVAN FEATURE
 );
 
 always #5 clk = ~clk;
@@ -195,6 +201,20 @@ task consulta;
     end
 endtask
 
+//IVAN FEATURE
+task checa;
+    input cond;
+    input [8*44-1:0] nome;
+    begin
+        if (cond !== 1'b1) begin
+            $display("FALHOU: %0s", nome);
+            erros = erros + 1;
+        end else begin
+            $display("PASSOU: %0s", nome);
+        end
+    end
+endtask
+
 // ─── Testes ──────────────────────────────────────────────
 integer t0;
 
@@ -209,6 +229,7 @@ initial begin
     wb = 3'b0; {rid1,rid2,rid3} = 15'b0; {r1,r2,r3} = 96'b0;
     cv = 3'b0;
     q_idade = 5'd0; q_addr = 32'd0;
+    flush_ok = 1'b0; flush_rob_id = 5'd0; rob_head = 5'd0;  //IVAN FEATURE
     //IVAN FEATURE
     store1_valid = 1'b0; store2_valid = 1'b0;
     store1_rob_id = 5'd0; store2_rob_id = 5'd0;
@@ -336,6 +357,41 @@ initial begin
     commita(3'b001);
     ciclos(1);
     checa_vazio("escrita do teste 6c");
+
+    //IVAN FEATURE: Teste 6d: recuperação (flush de desvio)
+    // S11 e S13 commitados (esperando a escrita); S15 e S17 pendentes; B = 16
+    $display("\n=== TESTE 6d: recuperacao ===");
+    rob_head = 5'd10;
+    p = U_sb.cptr;
+    despacha(3'b011, 3'b100, 3'b100, 3'b000, 5'd11, 5'd13, 5'd0, 32'd1, 32'd2, 32'd0);
+    resolve(3'b011, 5'd11, 5'd13, 5'd0, 32'h100, 32'h104, 32'd0);
+    despacha(3'b011, 3'b100, 3'b100, 3'b000, 5'd15, 5'd17, 5'd0, 32'd3, 32'd4, 32'd0);
+    espera_escrita(32'h100, 32'd1);
+    espera_escrita(32'h104, 32'd2);
+    commita(3'b011);                                          // S11 e S13 commitados
+
+    // O ROB já passou de 11 e 13 (rob_head = 14): pela distância, eles pareceriam
+    // mais novos que B, mas estão em [head, cptr) e não podem ser descartados
+    rob_head = 5'd14;
+    flush_ok = 1; flush_rob_id = 5'd16;
+    v = 3'b001; dst1 = 3'b100; rob_id1 = 5'd25;               // alocação do ciclo (ignorada)
+    @(posedge clk); #1;
+    flush_ok = 0; v = 3'b0;
+    checa(U_sb.tail === p + 5'd3, "corte: mantem S15, descarta S17");
+    checa(U_sb.cptr === p + 5'd2, "commitados mantidos (cptr)");
+
+    // Endereço atrasado do S17 descartado é ignorado
+    resolve(3'b001, 5'd17, 5'd0, 5'd0, 32'h10C, 32'd0, 32'd0);
+    p = p + 5'd3;
+    checa(U_sb.addr_ok[p[3:0]] === 1'b0, "endereco do Store descartado ignorado");
+
+    // S15 segue normalmente
+    resolve(3'b001, 5'd15, 5'd0, 5'd0, 32'h108, 32'd0, 32'd0);
+    espera_escrita(32'h108, 32'd3);
+    commita(3'b001);
+    ciclos(2);
+    checa_vazio("escritas do teste 6d");
+    rob_head = 5'd0;
 
     // ── Teste 7: enche até stop, sem commits ──
     $display("\n=== TESTE 7: Enchendo SB ate stop ===");

@@ -35,7 +35,12 @@ module store_buffer(
     output wire [31:0] mem_dado,
 
     // Sinal de parada
-    output wire stop
+    output wire stop,
+
+    //IVAN FEATURE: Recuperação de desvio (aviso do ROB)
+    input  wire       flush_ok,       //Desvio B errou e ainda está no ROB
+    input  wire [4:0] flush_rob_id,   //rob_id de B
+    input  wire [4:0] rob_head        //Head do ROB: referência de idade
 );
     // Ponteiros:
     //   head → próximo Store a ser escrito na memória
@@ -109,6 +114,28 @@ module store_buffer(
     wire [4:0] n_pendentes = tail - cptr;
     reg  [4:0] off;
 
+    //IVAN FEATURE: Recuperação
+    //Só a região não commitada [cptr, tail) pode ter Stores mais novos que B (B ainda
+    //não fez commit). Os commitados em [head, cptr) têm rob_id já liberado pelo ROB e
+    //não podem ser comparados. Na ordem do programa, os mais antigos que B formam o
+    //início da região: o novo tail é cptr + n_mantidos.
+    wire [4:0] dist_B = flush_rob_id - rob_head;
+    reg  [4:0] n_mantidos;
+    reg  [4:0] pos_m, dist_m;
+    integer m;
+
+    always @(*) begin
+        n_mantidos = 5'd0;
+        for (m = 0; m < 16; m = m + 1) begin
+            pos_m  = cptr + m;
+            dist_m = rob_id[pos_m[3:0]] - rob_head;
+            if (m < n_pendentes && dist_m < dist_B)
+                n_mantidos = n_mantidos + 5'd1;
+        end
+    end
+
+    wire [4:0] tail_flush = cptr + n_mantidos;
+
     integer i;
     always @(posedge clk) begin
         if (rst) begin
@@ -123,9 +150,15 @@ module store_buffer(
                 dado_ok[i] <= 1'b0;  //IVAN FEATURE
             end
         end else begin
-            tail <= tail + dispatched;
+            //IVAN FEATURE: No flush, o tail volta para depois do último Store mais antigo
+            //que B, e as alocações do ciclo (caminho errado) são ignoradas
+            if (flush_ok)
+                tail <= tail_flush;
+            else
+                tail <= tail + dispatched;
 
             // Despacho compactado
+            if (!flush_ok)  //IVAN FEATURE
             case({is_store1, is_store2, is_store3})
                 3'b001: begin
                     dado[tail[3:0]] <= dado3; rob_id[tail[3:0]] <= rob_id3; addr_ok[tail[3:0]] <= 1'b0;
@@ -156,9 +189,9 @@ module store_buffer(
             endcase
 
             //IVAN FEATURE: Entradas alocadas começam sem dado
-            if (dispatched >= 3'd1) dado_ok[tail[3:0]]  <= 1'b0;
-            if (dispatched >= 3'd2) dado_ok[tail2[3:0]] <= 1'b0;
-            if (dispatched == 3'd3) dado_ok[tail3[3:0]] <= 1'b0;
+            if (dispatched >= 3'd1 && !flush_ok) dado_ok[tail[3:0]]  <= 1'b0;
+            if (dispatched >= 3'd2 && !flush_ok) dado_ok[tail2[3:0]] <= 1'b0;
+            if (dispatched == 3'd3 && !flush_ok) dado_ok[tail3[3:0]] <= 1'b0;
 
             // Captura do endereço calculado pelos caminhos
             for (i = 0; i < 16; i = i + 1) begin
