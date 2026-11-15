@@ -34,7 +34,13 @@ module rob(
     output wire stop,
 
     //Posição atual da Tail, para o despacho
-    output wire [4:0] rob_tail
+    output wire [4:0] rob_tail,
+
+    //IVAN FEATURE: Recuperação de desvio com previsão errada
+    input  wire       flush,          //O caminho de desvio errou a previsão
+    input  wire [4:0] flush_rob_id,   //rob_id do desvio que errou (B)
+    output wire       flush_ok,       //Flush válido: B ainda está no ROB (repassado às outras unidades)
+    output wire [4:0] rob_head        //Head do ROB: referência de idade para as outras unidades
 );
     // Layout do buffer:
     //      32 posições de 43 bits cada:
@@ -88,6 +94,31 @@ module rob(
     //Expõe o Tail para acomodar as novas posições
     assign rob_tail = tail[4:0];
 
+    //IVAN FEATURE: Recuperação
+    //Uma posição está ocupada se a sua distância ao head é menor que a ocupação.
+    //Isso valida o flush (desvio de um caminho já descartado é ignorado) e filtra
+    //resultados que chegam para posições livres (instruções já descartadas).
+    //Premissa: uma posição liberada não é realocada antes de o resultado atrasado
+    //chegar (hoje os caminhos levam 1 ciclo e a realocação leva mais que isso).
+    //As outras unidades medem a idade de suas entradas pela distância a este head:
+    //uma entrada é mais nova que B se (rob_id - rob_head) > (flush_rob_id - rob_head)
+    assign rob_head = head[4:0];
+
+    wire [5:0] ocupadas = tail - head;
+    wire [4:0] dist_B   = flush_rob_id - head[4:0];
+    assign flush_ok = flush && ({1'b0, dist_B} < ocupadas);
+
+    wire [4:0] dist_r1 = rid1   - head[4:0];
+    wire [4:0] dist_r2 = rid2   - head[4:0];
+    wire [4:0] dist_r3 = rid3   - head[4:0];
+    wire [4:0] dist_lb = lb_rid - head[4:0];
+    wire aceita1  = ({1'b0, dist_r1} < ocupadas);
+    wire aceita2  = ({1'b0, dist_r2} < ocupadas);
+    wire aceita3  = ({1'b0, dist_r3} < ocupadas);
+    wire aceita_lb = ({1'b0, dist_lb} < ocupadas);
+
+    reg [4:0] dist_i;
+
     integer i;
     always @(posedge clk) begin
         if (rst) begin
@@ -97,15 +128,22 @@ module rob(
                 buffer[i][42:40] <= 3'b0;  // limpa valid, addr_ready e ready
         end else begin
             head <= head + commited;
-            tail <= tail + dispatched;
+
+            //IVAN FEATURE: No flush, o tail volta para logo depois de B e as
+            //alocações do ciclo (caminho errado) são ignoradas
+            if (flush_ok)
+                tail <= head + {1'b0, dist_B} + 6'd1;
+            else
+                tail <= tail + dispatched;
 
             // Se a instrução vem do despacho de forma válida, guarda ela
-            if(v[0]) buffer[tail[4:0]]  <= {1'b1, 2'b0, dst1, rd1, 32'b0};
-            if(v[1]) buffer[tail2[4:0]] <= {1'b1, 2'b0, dst2, rd2, 32'b0};
-            if(v[2]) buffer[tail3[4:0]] <= {1'b1, 2'b0, dst3, rd3, 32'b0};
+            if(v[0] && !flush_ok) buffer[tail[4:0]]  <= {1'b1, 2'b0, dst1, rd1, 32'b0};
+            if(v[1] && !flush_ok) buffer[tail2[4:0]] <= {1'b1, 2'b0, dst2, rd2, 32'b0};
+            if(v[2] && !flush_ok) buffer[tail3[4:0]] <= {1'b1, 2'b0, dst3, rd3, 32'b0};
 
             // Se a instrução foi resolvida, atualizamos o res e os bits de controle
-            if(wb[0]) begin
+            //IVAN FEATURE: só para posições ocupadas (aceita*)
+            if(wb[0] && aceita1) begin
                 buffer[rid1][31:0] <= r1;
                 if(buffer[rid1][39:37] == 3'b010) begin
                     buffer[rid1][41] <= 1'b1;
@@ -114,7 +152,7 @@ module rob(
                 end
             end
 
-            if(wb[1]) begin
+            if(wb[1] && aceita2) begin
                 buffer[rid2][31:0] <= r2;
                 if(buffer[rid2][39:37] == 3'b010) begin
                     buffer[rid2][41] <= 1'b1;
@@ -123,7 +161,7 @@ module rob(
                 end
             end
 
-            if(wb[2]) begin
+            if(wb[2] && aceita3) begin
                 buffer[rid3][31:0] <= r3;
                 if(buffer[rid3][39:37] == 3'b010) begin
                     buffer[rid3][41] <= 1'b1;
@@ -133,12 +171,21 @@ module rob(
             end
 
             // Load Buffer sinaliza que o dado chegou — pode commitar
-            if(lb_done) buffer[lb_rid][40] <= 1'b1;  // ready=1
+            if(lb_done && aceita_lb) buffer[lb_rid][40] <= 1'b1;  // ready=1 (IVAN FEATURE: só se ocupada)
 
             // Se foi commitada, torna-se inválida e não pronta
             if(c1) buffer[head[4:0]][42:40]  <= 3'b0;
             if(c2) buffer[head2[4:0]][42:40] <= 3'b0;
             if(c3) buffer[head3[4:0]][42:40] <= 3'b0;
+
+            //IVAN FEATURE: Limpeza das entradas mais novas que B.
+            //Fica por último para vencer os wb do mesmo ciclo (vale a última atribuição).
+            if (flush_ok) begin
+                for (i = 0; i < 32; i = i + 1) begin
+                    dist_i = i[4:0] - head[4:0];
+                    if (dist_i > dist_B) buffer[i][42:40] <= 3'b0;
+                end
+            end
         end
     end
 endmodule

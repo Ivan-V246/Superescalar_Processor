@@ -29,6 +29,13 @@ wire [31:0] cr1, cr2, cr3;
 wire        stop;
 wire [4:0]  rob_tail;
 
+//IVAN FEATURE: recuperação
+reg         flush;
+reg  [4:0]  flush_rob_id;
+wire        flush_ok;
+integer     erros = 0;
+integer     k;
+
 rob U_rob (
     .clk(clk), .rst(rst),
     .v(v),
@@ -45,7 +52,9 @@ rob U_rob (
     .lb_done(lb_done), .lb_rid(lb_rid),
     .srid(srid_dummy), .saddr(saddr),
     .stop(stop),
-    .rob_tail(rob_tail)
+    .rob_tail(rob_tail),
+    //IVAN FEATURE
+    .flush(flush), .flush_rob_id(flush_rob_id), .flush_ok(flush_ok)
 );
 
 always #5 clk = ~clk;
@@ -110,6 +119,20 @@ task mostra_estado;
     end
 endtask
 
+//IVAN FEATURE
+task checa;
+    input cond;
+    input [8*48-1:0] nome;
+    begin
+        if (cond !== 1'b1) begin
+            $display("FALHOU: %0s", nome);
+            erros = erros + 1;
+        end else begin
+            $display("PASSOU: %0s", nome);
+        end
+    end
+endtask
+
 // ─── Testes ──────────────────────────────────────────────
 
 initial begin
@@ -126,6 +149,7 @@ initial begin
     lb_done = 0; lb_rid = 5'b0;
     lrid_dummy = 5'b0;
     srid_dummy = 5'b0;
+    flush = 0; flush_rob_id = 5'd0;  //IVAN FEATURE
     @(posedge clk); #1;
     rst = 0;
 
@@ -201,6 +225,79 @@ initial begin
             U_rob.tail - U_rob.head, stop);
     end
 
+    //IVAN FEATURE: testes verificados da recuperação
+    $display("\n=== TESTE 11: Recuperacao (flush) ===");
+    rst = 1; @(posedge clk); #1; rst = 0;
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd1,5'd2,5'd3);   // rob 0,1,2 (2 = desvio B)
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd4,5'd5,5'd6);   // rob 3,4,5 (mais novas)
+    writeback(3'b011, 5'd3,5'd4,5'd0, 32'd33,32'd44,32'd0);   // 3 e 4 terminam antes do flush
+
+    // Ciclo do flush: B termina, erra, e o despacho tenta alocar (caminho errado)
+    wb = 3'b001; rid1 = 5'd2; r1 = 32'd22;
+    flush = 1; flush_rob_id = 5'd2;
+    v = 3'b111; {dst1,dst2,dst3} = 9'b0;
+    #1;
+    checa(flush_ok === 1'b1, "flush de B valido");
+    @(posedge clk); #1;
+    wb = 0; flush = 0; v = 0;
+    checa(U_rob.tail === 6'd3, "tail volta para B+1");
+    checa(U_rob.buffer[2][40] === 1'b1, "B recebe o proprio resultado");
+    checa(U_rob.buffer[3][42:40] === 3'b0 && U_rob.buffer[4][42:40] === 3'b0,
+          "entradas mais novas que B limpas");
+    checa(U_rob.buffer[6][42] === 1'b0, "alocacao do ciclo do flush ignorada");
+
+    // Resultados atrasados de instruções descartadas
+    writeback(3'b001, 5'd5,5'd0,5'd0, 32'd55,32'd0,32'd0);
+    checa(U_rob.buffer[5][40] === 1'b0, "wb atrasado ignorado");
+    lb_done = 1; lb_rid = 5'd4; @(posedge clk); #1; lb_done = 0;
+    checa(U_rob.buffer[4][40] === 1'b0, "lb_done atrasado ignorado");
+
+    // Flush de um desvio já descartado
+    flush = 1; flush_rob_id = 5'd4; #1;
+    checa(flush_ok === 1'b0, "flush de desvio descartado ignorado");
+    @(posedge clk); #1; flush = 0;
+    checa(U_rob.tail === 6'd3, "tail inalterado");
+
+    // O commit não passa do tail
+    writeback(3'b011, 5'd0,5'd1,5'd0, 32'd10,32'd11,32'd0);
+    @(posedge clk); #1;
+    @(posedge clk); #1;
+    checa(U_rob.head === 6'd3, "commit para no tail (head = 3)");
+
+    $display("\n=== TESTE 12: wb no mesmo ciclo do flush ===");
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd7,5'd8,5'd9);   // rob 3,4,5
+    wb = 3'b011; rid1 = 5'd3; r1 = 32'd1; rid2 = 5'd4; r2 = 32'd2;  // B=3 e a mais nova 4
+    flush = 1; flush_rob_id = 5'd3;
+    @(posedge clk); #1;
+    wb = 0; flush = 0;
+    checa(U_rob.buffer[3][40] === 1'b1, "B pronto");
+    checa(U_rob.buffer[4][40] === 1'b0, "wb da mais nova perde para a limpeza");
+    checa(U_rob.tail === 6'd4, "tail = B+1");
+
+    // O head precisa já ter dado uma volta (bit de volta = 1) para testar a conta do tail
+    $display("\n=== TESTE 13: flush com volta do head (31 -> 0) ===");
+    rst = 1; @(posedge clk); #1; rst = 0;
+    for (k = 0; k < 20; k = k + 1) begin
+        despacha(3'b111, 3'b000,3'b000,3'b000, 5'd1,5'd1,5'd1);
+        writeback(3'b111, (k*3) % 32, (k*3+1) % 32, (k*3+2) % 32, 32'd0,32'd0,32'd0);
+    end
+    @(posedge clk); #1;
+    checa(U_rob.head === 6'd60 && U_rob.tail === 6'd60, "head e tail em 60 (posicao 28, segunda volta)");
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd1,5'd1,5'd1);   // rob 28,29,30
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd1,5'd1,5'd1);   // rob 31,0,1
+    writeback(3'b011, 5'd0,5'd1,5'd0, 32'd0,32'd0,32'd0);     // 0 e 1 (mais novas que B) terminam
+    flush = 1; flush_rob_id = 5'd31;
+    @(posedge clk); #1; flush = 0;
+    checa(U_rob.tail === 6'd0, "tail = 64 -> 0 (posicao 0, bit de volta certo)");
+    checa(U_rob.buffer[0][42:40] === 3'b0 && U_rob.buffer[1][42:40] === 3'b0,
+          "entradas depois da volta limpas");
+    checa(U_rob.buffer[28][42] === 1'b1 && U_rob.buffer[31][42] === 1'b1,
+          "entradas antes de B e B mantidas");
+
+    if (erros == 0)
+        $display("\nTESTES VERIFICADOS PASSARAM");
+    else
+        $display("\n%0d ERRO(S)", erros);
     $display("\nFim dos testes.");
     #20;
     $finish;
