@@ -307,7 +307,10 @@ module processador (input clk, input rst);
         .sb_tail(sb_tail), .q_idade(lb_q_idade), .q_addr(laddr),
         .q_espera(sb_q_espera), .q_hit(sb_q_hit), .q_dado(sb_q_dado),
         .mem_req(sb_mem_req), .mem_addr(sb_mem_addr), .mem_dado(sb_mem_dado),
-        .stop(sb_stop)
+        .stop(sb_stop),
+
+        //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
+        .flush_ok(1'b0), .flush_rob_id(5'd0), .rob_head(5'd0)
     );
 
     load_buffer lbuf (
