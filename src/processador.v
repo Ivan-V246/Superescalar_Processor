@@ -282,7 +282,10 @@ module processador (input clk, input rst);
 
         // para o despacho
         .stop(rob_stop),
-        .rob_tail(rob_tail)
+        .rob_tail(rob_tail),
+
+        //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
+        .flush(1'b0), .flush_rob_id(5'd0), .flush_ok(), .rob_head()
     );
 
     store_buffer sbuf (
