@@ -84,7 +84,11 @@ module load_buffer(
     wire commit3 = commit2 &
                    (cv[2] & (crob_id3 == buffer[head3[3:0]][36:32]));
 
-    wire [2:0] aposentados = commit1 + commit2 + commit3;
+    //PEDRO: Correção. A versão anterior comparava o mesmo commit com mais de uma entrada e
+    //podia aposentar entradas vazias (rob_id antigo ou 0 do reset), passando o head do tail
+    //e deixando o stop ligado para sempre. O ROB aposenta os loads em ordem e eles estão em
+    //ordem no buffer, então o número de aposentados é o número de commits de load.
+    wire [2:0] aposentados = cv[0] + cv[1] + cv[2];
 
     assign lrid    = buffer[mem_ptr[3:0]][36:32];
     assign q_idade = idade[mem_ptr[3:0]];
