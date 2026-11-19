@@ -184,7 +184,8 @@ initial begin
     mostra_estado;
     executa_load(32'hBBBB0002, 32'd200, 1, 3);
     mostra_estado;
-    commita(3'b011, 5'd1, 5'd2, 5'd0);
+    //IVAN FEATURE: cv marca só os commits que são Load (regra nova do aposentados)
+    commita(3'b010, 5'd1, 5'd2, 5'd0);
     mostra_estado;
 
     // ── Teste 3: Load slot1 + ADD slot2 + Load slot3 ──
@@ -201,7 +202,8 @@ initial begin
     // Load rob_id=5
     executa_load(32'hCCCC0005, 32'd500, 1, 2);
     mostra_estado;
-    commita(3'b111, 5'd3, 5'd4, 5'd5);
+    //IVAN FEATURE: cv marca só os commits que são Load (regra nova do aposentados)
+    commita(3'b101, 5'd3, 5'd4, 5'd5);
     mostra_estado;
 
     // ── Teste 4: 3 Loads simultaneos ──
