@@ -42,7 +42,12 @@ module load_buffer(
     //IVAN FEATURE: Recuperação de desvio (aviso do ROB)
     input  wire       flush_ok,       //Desvio B errou e ainda está no ROB
     input  wire [4:0] flush_rob_id,   //rob_id de B
-    input  wire [4:0] rob_head        //Head do ROB: referência de idade
+    input  wire [4:0] rob_head,       //Head do ROB: referência de idade
+
+    //IVAN FEATURE: Tamanho do acesso (lb, lh, lw, lbu, lhu)
+    input  wire [2:0] funct3_1, funct3_2, funct3_3,  //funct3 de cada slot na alocação
+    output wire [2:0] q_funct3,                      //funct3 do Load em consulta (Store Buffer)
+    output wire [2:0] mem_funct3                     //funct3 do Load que pede a memória
 );
     // Layout:
     // [37]    → dado_pronto
@@ -51,6 +56,7 @@ module load_buffer(
     reg [37:0] buffer [0:15];
     reg [4:0]  idade  [0:15];   // Tail do Store Buffer no despacho: Stores mais antigos estão antes dele
     reg [4:0] head, mem_ptr, tail;
+    reg [2:0]  f3     [0:15];   //IVAN FEATURE: funct3 de cada Load
 
     wire [4:0] head2 = head + 1;
     wire [4:0] head3 = head + 2;
@@ -92,6 +98,10 @@ module load_buffer(
 
     assign lrid    = buffer[mem_ptr[3:0]][36:32];
     assign q_idade = idade[mem_ptr[3:0]];
+
+    //IVAN FEATURE: O Load em mem_ptr é o que consulta o Store Buffer e o que pede a memória
+    assign q_funct3   = f3[mem_ptr[3:0]];
+    assign mem_funct3 = f3[mem_ptr[3:0]];
 
     //IVAN FEATURE: Recuperação
     //Todas as entradas ainda não fizeram commit e estão na ordem do programa, então as
@@ -151,6 +161,7 @@ module load_buffer(
             for (i = 0; i < 16; i = i + 1) begin
                 buffer[i] <= 38'b0;
                 idade[i]  <= 5'b0;
+                f3[i]     <= 3'b010;  //IVAN FEATURE
             end
         end else begin
             head <= head + aposentados;
@@ -195,6 +206,19 @@ module load_buffer(
                     buffer[tail2[3:0]] <= {1'b0, rob_id2, 32'b0}; idade[tail2[3:0]] <= idade2;
                     buffer[tail3[3:0]] <= {1'b0, rob_id3, 32'b0}; idade[tail3[3:0]] <= idade3;
                 end
+            endcase
+
+            //IVAN FEATURE: funct3 guardado na mesma posição compactada do Load
+            if (!flush_ok)
+            case({is_load1, is_load2, is_load3})
+                3'b001: f3[tail[3:0]] <= funct3_3;
+                3'b010: f3[tail[3:0]] <= funct3_2;
+                3'b011: begin f3[tail[3:0]] <= funct3_2; f3[tail2[3:0]] <= funct3_3; end
+                3'b100: f3[tail[3:0]] <= funct3_1;
+                3'b101: begin f3[tail[3:0]] <= funct3_1; f3[tail2[3:0]] <= funct3_3; end
+                3'b110: begin f3[tail[3:0]] <= funct3_1; f3[tail2[3:0]] <= funct3_2; end
+                3'b111: begin f3[tail[3:0]] <= funct3_1; f3[tail2[3:0]] <= funct3_2; f3[tail3[3:0]] <= funct3_3; end
+                default: ;
             endcase
 
             if(termina) begin

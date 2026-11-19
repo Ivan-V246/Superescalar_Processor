@@ -51,6 +51,9 @@ module despacho(
     output reg  [4:0]  rob_id1, rob_id2, rob_id3,
     output wire [31:0] dado1, dado2, dado3,   //Não usados (o dado do store vai no envio)
 
+    //IVAN FEATURE: Tamanho do acesso (funct3) de cada slot alocado, para os Load/Store Buffers
+    output reg  [2:0]  funct3_1, funct3_2, funct3_3,
+
     //Alocação, para a unidade de hazard (mesma ordem de v)
     output reg  [4:0]  al_rs1_0, al_rs1_1, al_rs1_2,
     output reg  [4:0]  al_rs2_0, al_rs2_1, al_rs2_2,
@@ -140,13 +143,15 @@ module despacho(
     wire [4:0] e_rs2  [0:2];
     wire       e_desv [0:2];
     wire       e_par  [0:2];
+    wire [2:0] e_f3   [0:2];   //IVAN FEATURE: funct3 de memória de cada slot da entrada
 
+    //IVAN FEATURE: .mem_funct3 ligado em e_f3
     decoder decE0 (.instr(mei_instr0), .instr_valid(), .parada(e_par[0]), .ilegal(), .desvio(e_desv[0]),
-        .dst(e_dst[0]), .rs1(e_rs1[0]), .rs2(e_rs2[0]), .rd(e_rd[0]), .alu_op(), .mem_funct3(), .imm());
+        .dst(e_dst[0]), .rs1(e_rs1[0]), .rs2(e_rs2[0]), .rd(e_rd[0]), .alu_op(), .mem_funct3(e_f3[0]), .imm());
     decoder decE1 (.instr(mei_instr1), .instr_valid(), .parada(e_par[1]), .ilegal(), .desvio(e_desv[1]),
-        .dst(e_dst[1]), .rs1(e_rs1[1]), .rs2(e_rs2[1]), .rd(e_rd[1]), .alu_op(), .mem_funct3(), .imm());
+        .dst(e_dst[1]), .rs1(e_rs1[1]), .rs2(e_rs2[1]), .rd(e_rd[1]), .alu_op(), .mem_funct3(e_f3[1]), .imm());
     decoder decE2 (.instr(mei_instr2), .instr_valid(), .parada(e_par[2]), .ilegal(), .desvio(e_desv[2]),
-        .dst(e_dst[2]), .rs1(e_rs1[2]), .rs2(e_rs2[2]), .rd(e_rd[2]), .alu_op(), .mem_funct3(), .imm());
+        .dst(e_dst[2]), .rs1(e_rs1[2]), .rs2(e_rs2[2]), .rd(e_rd[2]), .alu_op(), .mem_funct3(e_f3[2]), .imm());
 
     //------------------------------------------------------------------
     //Entrada na fila e alocação
@@ -184,6 +189,7 @@ module despacho(
         al_escreve0 = 0; al_escreve1 = 0; al_escreve2 = 0;
         al_alu0 = 0; al_alu1 = 0; al_alu2 = 0;
         al_desvio0 = 0; al_desvio1 = 0; al_desvio2 = 0;
+        funct3_1 = 3'b010; funct3_2 = 3'b010; funct3_3 = 3'b010;  //IVAN FEATURE
 
         //O k-ésimo válido usa o slot k e o rob_id Rob_tail + k
         k_aloc = 2'd0;
@@ -196,18 +202,21 @@ module despacho(
                             al_rs1_0 = e_rs1[j]; al_rs2_0 = e_rs2[j];
                             al_escreve0 = (e_dst[j] == DST_REG || e_dst[j] == DST_LOAD) && e_rd[j] != 5'd0;
                             al_alu0 = (e_dst[j] == DST_REG); al_desvio0 = e_desv[j];
+                            funct3_1 = e_f3[j];  //IVAN FEATURE
                         end
                         2'd1: begin
                             v[1] = 1'b1; dst2 = e_dst[j]; rd2 = e_rd[j];
                             al_rs1_1 = e_rs1[j]; al_rs2_1 = e_rs2[j];
                             al_escreve1 = (e_dst[j] == DST_REG || e_dst[j] == DST_LOAD) && e_rd[j] != 5'd0;
                             al_alu1 = (e_dst[j] == DST_REG); al_desvio1 = e_desv[j];
+                            funct3_2 = e_f3[j];  //IVAN FEATURE
                         end
                         default: begin
                             v[2] = 1'b1; dst3 = e_dst[j]; rd3 = e_rd[j];
                             al_rs1_2 = e_rs1[j]; al_rs2_2 = e_rs2[j];
                             al_escreve2 = (e_dst[j] == DST_REG || e_dst[j] == DST_LOAD) && e_rd[j] != 5'd0;
                             al_alu2 = (e_dst[j] == DST_REG); al_desvio2 = e_desv[j];
+                            funct3_3 = e_f3[j];  //IVAN FEATURE
                         end
                     endcase
                     k_aloc = k_aloc + 2'd1;

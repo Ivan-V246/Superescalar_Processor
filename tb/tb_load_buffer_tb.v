@@ -33,6 +33,10 @@ wire [4:0]  lb_rid;
 wire [31:0] lb_dado1, lb_dado2, lb_dado3;
 wire        stop;
 
+//IVAN FEATURE: tamanho dos acessos (padrão: palavra)
+reg  [2:0] f3_1 = 3'b010, f3_2 = 3'b010, f3_3 = 3'b010;
+wire [2:0] q_funct3, mem_funct3;
+
 load_buffer U_lb (
     .clk(clk), .rst(rst),
     .v(v),
@@ -46,7 +50,10 @@ load_buffer U_lb (
     .lb_done(lb_done), .lb_rid(lb_rid),
     .cv(cv), .crob_id1(crob_id1), .crob_id2(crob_id2), .crob_id3(crob_id3),
     .lb_dado1(lb_dado1), .lb_dado2(lb_dado2), .lb_dado3(lb_dado3),
-    .stop(stop)
+    .stop(stop),
+    //IVAN FEATURE: tamanho dos acessos
+    .funct3_1(f3_1), .funct3_2(f3_2), .funct3_3(f3_3),
+    .q_funct3(q_funct3), .mem_funct3(mem_funct3)
 );
 
 always #5 clk = ~clk;
@@ -343,6 +350,23 @@ initial begin
     commita(3'b111, 5'd11, 5'd13, 5'd22);
     checa(U_lb.head === U_lb.tail, "Loads mantidos aposentados");
     rob_head = 5'd0;
+
+    //IVAN FEATURE: Teste 4e: tamanho do acesso (funct3)
+    // Load (lb) + ADD + Load (lhu): o funct3 segue a posição compactada de cada Load
+    $display("\n=== TESTE 4e: funct3 ===");
+    p0 = U_lb.tail;
+    f3_1 = 3'b000; f3_2 = 3'b111; f3_3 = 3'b101;
+    despacha(3'b111, 3'b010, 3'b000, 3'b010, 5'd1, 5'd2, 5'd3);
+    f3_1 = 3'b010; f3_2 = 3'b010; f3_3 = 3'b010;
+    checa(U_lb.f3[p0[3:0]] === 3'b000, "lb guardado no slot 1");
+    p0 = p0 + 5'd1;
+    checa(U_lb.f3[p0[3:0]] === 3'b101, "lhu (slot 3) compactado logo depois");
+    checa(q_funct3 === 3'b000 && mem_funct3 === 3'b000, "funct3 do Load em mem_ptr (lb)");
+    executa_load(32'h10, 32'd5, 0, 1);
+    checa(q_funct3 === 3'b101 && mem_funct3 === 3'b101, "funct3 do proximo Load (lhu)");
+    executa_load(32'h14, 32'd6, 0, 1);
+    commita(3'b101, 5'd1, 5'd3, 5'd0);
+    checa(U_lb.head === U_lb.tail, "Loads do teste 4e aposentados");
 
     // ── Teste 5: Enche até stop ──
     $display("\n=== TESTE 5: Enchendo LB ate stop ===");

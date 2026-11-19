@@ -40,7 +40,12 @@ module store_buffer(
     //IVAN FEATURE: Recuperação de desvio (aviso do ROB)
     input  wire       flush_ok,       //Desvio B errou e ainda está no ROB
     input  wire [4:0] flush_rob_id,   //rob_id de B
-    input  wire [4:0] rob_head        //Head do ROB: referência de idade
+    input  wire [4:0] rob_head,       //Head do ROB: referência de idade
+
+    //IVAN FEATURE: Tamanho do acesso (sb, sh, sw)
+    input  wire [2:0] funct3_1, funct3_2, funct3_3,  //funct3 de cada slot na alocação
+    input  wire [2:0] q_funct3,                      //funct3 do Load em consulta
+    output wire [2:0] mem_funct3                     //funct3 do Store escrito na memória
 );
     // Ponteiros:
     //   head → próximo Store a ser escrito na memória
@@ -53,6 +58,7 @@ module store_buffer(
     reg        addr_ok [0:15];
     reg [4:0]  rob_id  [0:15];
     reg        dado_ok [0:15];   //IVAN FEATURE: dado já recebido do despacho
+    reg [2:0]  f3      [0:15];   //IVAN FEATURE: funct3 de cada Store
     reg [4:0] head, cptr, tail;
 
     wire [4:0] tail2 = tail + 1;
@@ -72,6 +78,7 @@ module store_buffer(
     assign mem_req  = (head != cptr);
     assign mem_addr = addr[head[3:0]];
     assign mem_dado = dado[head[3:0]];
+    assign mem_funct3 = f3[head[3:0]];   //IVAN FEATURE
 
     assign sb_tail = tail;
 
@@ -85,21 +92,60 @@ module store_buffer(
     reg  [4:0] ptr;
     integer k;
 
+    //IVAN FEATURE: Acessos de tamanhos diferentes
+    //PREMISSA: o programa só faz acessos alinhados (lh/lhu/sh em endereço par, lw/sw em
+    //múltiplo de 4), como o RV32I permite exigir. Assim todo acesso cabe numa palavra só.
+    //Um acesso desalinhado que cruza duas palavras não é detectado aqui, e o Load pode
+    //ler um valor antigo da memória.
+    //Dois acessos se sobrepõem se estão na mesma palavra e as máscaras de bytes se cruzam.
+    //  - Store no mesmo endereço e do mesmo tamanho do Load: cobre o Load inteiro, forwarding
+    //    com a extensão do Load (lb/lh com sinal, lbu/lhu com zero);
+    //  - qualquer outra sobreposição: o Load espera o Store ser escrito na memória.
+    function [3:0] mascara;
+        input [2:0] f;
+        input [1:0] a;
+        case (f[1:0])
+            2'b00:   mascara = 4'b0001 << a;   //byte
+            2'b01:   mascara = 4'b0011 << a;   //meia palavra
+            default: mascara = 4'b1111;        //palavra
+        endcase
+    endfunction
+
+    function [31:0] estende;
+        input [2:0]  f;
+        input [31:0] d;
+        case (f)
+            3'b000:  estende = {{24{d[7]}},  d[7:0]};    //lb
+            3'b001:  estende = {{16{d[15]}}, d[15:0]};   //lh
+            3'b100:  estende = {24'b0, d[7:0]};          //lbu
+            3'b101:  estende = {16'b0, d[15:0]};         //lhu
+            default: estende = d;                        //lw
+        endcase
+    endfunction
+
+    wire [3:0] q_mascara = mascara(q_funct3, q_addr[1:0]);
+    reg        sobrepoe, cobre;
+
     always @(*) begin
         q_espera = 1'b0;
         q_hit    = 1'b0;
         q_dado   = 32'b0;
         for (k = 0; k < 16; k = k + 1) begin
             ptr = head + k;
+            //IVAN FEATURE
+            sobrepoe = (addr[ptr[3:0]][31:2] == q_addr[31:2]) &&
+                       ((mascara(f3[ptr[3:0]], addr[ptr[3:0]][1:0]) & q_mascara) != 4'b0);
+            cobre    = (addr[ptr[3:0]] == q_addr) && (f3[ptr[3:0]][1:0] == q_funct3[1:0]);
             if (k < n_antigos) begin
                 if (!addr_ok[ptr[3:0]]) begin
                     q_espera = 1'b1;
-                end else if (addr[ptr[3:0]] == q_addr) begin
-                    //IVAN FEATURE: Store que coincide sem dado ainda: o Load espera
-                    if (dado_ok[ptr[3:0]]) begin
+                end else if (sobrepoe) begin   //IVAN FEATURE: era addr == q_addr
+                    //IVAN FEATURE: Store que coincide sem dado ainda, ou que não cobre o
+                    //Load inteiro: o Load espera
+                    if (cobre && dado_ok[ptr[3:0]]) begin
                         q_hit    = 1'b1;
                         q_espera = 1'b0;
-                        q_dado   = dado[ptr[3:0]];
+                        q_dado   = estende(q_funct3, dado[ptr[3:0]]);  //IVAN FEATURE
                     end else begin
                         q_hit    = 1'b0;
                         q_espera = 1'b1;
@@ -148,6 +194,7 @@ module store_buffer(
                 addr_ok[i] <= 1'b0;
                 rob_id[i]  <= 5'b0;
                 dado_ok[i] <= 1'b0;  //IVAN FEATURE
+                f3[i]      <= 3'b010;  //IVAN FEATURE
             end
         end else begin
             //IVAN FEATURE: No flush, o tail volta para depois do último Store mais antigo
@@ -186,6 +233,19 @@ module store_buffer(
                     dado[tail2[3:0]] <= dado2; rob_id[tail2[3:0]] <= rob_id2; addr_ok[tail2[3:0]] <= 1'b0;
                     dado[tail3[3:0]] <= dado3; rob_id[tail3[3:0]] <= rob_id3; addr_ok[tail3[3:0]] <= 1'b0;
                 end
+            endcase
+
+            //IVAN FEATURE: funct3 guardado na mesma posição compactada do Store
+            if (!flush_ok)
+            case({is_store1, is_store2, is_store3})
+                3'b001: f3[tail[3:0]] <= funct3_3;
+                3'b010: f3[tail[3:0]] <= funct3_2;
+                3'b011: begin f3[tail[3:0]] <= funct3_2; f3[tail2[3:0]] <= funct3_3; end
+                3'b100: f3[tail[3:0]] <= funct3_1;
+                3'b101: begin f3[tail[3:0]] <= funct3_1; f3[tail2[3:0]] <= funct3_3; end
+                3'b110: begin f3[tail[3:0]] <= funct3_1; f3[tail2[3:0]] <= funct3_2; end
+                3'b111: begin f3[tail[3:0]] <= funct3_1; f3[tail2[3:0]] <= funct3_2; f3[tail3[3:0]] <= funct3_3; end
+                default: ;
             endcase
 
             //IVAN FEATURE: Entradas alocadas começam sem dado

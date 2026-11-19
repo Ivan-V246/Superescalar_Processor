@@ -110,6 +110,11 @@ module processador (input clk, input rst);
     wire [4:0]  disp_st1_rob_id, disp_st2_rob_id;
     wire [31:0] disp_st1_dado, disp_st2_dado;
 
+    //IVAN FEATURE: Tamanho dos acessos à memória (funct3)
+    wire [2:0]  disp_f3_1, disp_f3_2, disp_f3_3;    // despacho → buffers: funct3 na alocação
+    wire [2:0]  lb_q_funct3;                         // load buffer → store buffer: consulta
+    wire [2:0]  lb_mem_funct3, sb_mem_funct3;        // buffers → MED
+
     //Hazard e forwarding
     wire [4:0]  h_rs1_0, h_rs2_0, h_rs1_1, h_rs2_1;   //despacho -> hazard: o que as instruções da frente leem
     wire [4:0]  h_rd0, h_rd1;                         //e o que escrevem
@@ -149,6 +154,7 @@ module processador (input clk, input rst);
         .rd1(disp_rd1), .rd2(disp_rd2), .rd3(disp_rd3),
         .rob_id1(rob_id1), .rob_id2(rob_id2), .rob_id3(rob_id3),
         .dado1(disp_dado1), .dado2(disp_dado2), .dado3(disp_dado3),
+        .funct3_1(disp_f3_1), .funct3_2(disp_f3_2), .funct3_3(disp_f3_3),  //IVAN FEATURE
         .al_rs1_0(al_rs1_0), .al_rs1_1(al_rs1_1), .al_rs1_2(al_rs1_2),
         .al_rs2_0(al_rs2_0), .al_rs2_1(al_rs2_1), .al_rs2_2(al_rs2_2),
         .al_escreve0(al_esc0), .al_escreve1(al_esc1), .al_escreve2(al_esc2),
@@ -332,7 +338,11 @@ module processador (input clk, input rst);
         .stop(sb_stop),
 
         //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
-        .flush_ok(flush_ok), .flush_rob_id(rid3), .rob_head(rob_head)
+        .flush_ok(flush_ok), .flush_rob_id(rid3), .rob_head(rob_head),
+
+        //IVAN FEATURE: tamanho dos acessos
+        .funct3_1(disp_f3_1), .funct3_2(disp_f3_2), .funct3_3(disp_f3_3),
+        .q_funct3(lb_q_funct3), .mem_funct3(sb_mem_funct3)
     );
 
     load_buffer lbuf (
@@ -352,7 +362,11 @@ module processador (input clk, input rst);
         .lb_tail(lb_tail),  //IVAN FEATURE
 
         //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
-        .flush_ok(flush_ok), .flush_rob_id(rid3), .rob_head(rob_head)
+        .flush_ok(flush_ok), .flush_rob_id(rid3), .rob_head(rob_head),
+
+        //IVAN FEATURE: tamanho dos acessos
+        .funct3_1(disp_f3_1), .funct3_2(disp_f3_2), .funct3_3(disp_f3_3),
+        .q_funct3(lb_q_funct3), .mem_funct3(lb_mem_funct3)
     );
 
     assign load_grant = lb_mem_req & !sb_mem_req;
@@ -361,7 +375,7 @@ module processador (input clk, input rst);
         .clk(clk), .rst(rst),
         .memRead(load_grant),
         .memWrite(sb_mem_req),
-        .funct3(3'b010),
+        .funct3(sb_mem_req ? sb_mem_funct3 : lb_mem_funct3),  //IVAN FEATURE: era 3'b010
         .ende_dado(sb_mem_req ? sb_mem_addr : laddr),
         .dado_entrada(sb_mem_dado),
         .dado_saida(med_saida)
