@@ -368,6 +368,31 @@ initial begin
     commita(3'b101, 5'd1, 5'd3, 5'd0);
     checa(U_lb.head === U_lb.tail, "Loads do teste 4e aposentados");
 
+    //IVAN FEATURE: Teste 4f: commit e flush no mesmo ciclo
+    // rob_head = 1; Loads 1, 2, 3, 5, 6; B = 4. Os Loads 1 e 2 fazem commit no ciclo do
+    // flush; o 3 é mantido sem ter executado; 5 e 6 são descartados
+    $display("\n=== TESTE 4f: commit e flush no mesmo ciclo ===");
+    rob_head = 5'd1;
+    p0 = U_lb.tail;
+    despacha(3'b111, 3'b010, 3'b010, 3'b010, 5'd1, 5'd2, 5'd3);
+    despacha(3'b011, 3'b010, 3'b010, 3'b000, 5'd5, 5'd6, 5'd0);
+    executa_load(32'h20, 32'd71, 0, 1);                     // Load 1
+    executa_load(32'h24, 32'd72, 0, 1);                     // Load 2
+    cv = 3'b011; crob_id1 = 5'd1; crob_id2 = 5'd2;
+    flush_ok = 1; flush_rob_id = 5'd4;
+    @(posedge clk); #1;
+    cv = 3'b0; flush_ok = 0;
+    checa(U_lb.head === p0 + 5'd2, "head avanca pelo commit (1 e 2)");
+    checa(U_lb.tail === p0 + 5'd3, "tail depois do Load 3");
+    checa(U_lb.mem_ptr === p0 + 5'd2, "mem_ptr no Load 3");
+    checa(lrid === 5'd3, "proximo Load a executar e o 3");
+    executa_load(32'h28, 32'd73, 0, 1);                     // Load 3
+    p0 = p0 + 5'd2;
+    checa(U_lb.buffer[p0[3:0]][31:0] === 32'd73, "dado do Load 3 gravado");
+    commita(3'b001, 5'd3, 5'd0, 5'd0);
+    checa(U_lb.head === U_lb.tail && U_lb.mem_ptr === U_lb.tail, "Load 3 aposentado, buffer vazio");
+    rob_head = 5'd0;
+
     // ── Teste 5: Enche até stop ──
     $display("\n=== TESTE 5: Enchendo LB ate stop ===");
     begin : enche

@@ -455,6 +455,30 @@ initial begin
     ciclos(1);
     checa_vazio("escritas do teste 6e");
 
+    //IVAN FEATURE: Teste 6f: commit e flush no mesmo ciclo
+    // rob_head = 1; Stores 1, 2, 3, 5, 6; B = 4. Os Stores 1 e 2 fazem commit no ciclo do
+    // flush; o 3 é mantido sem commit; 5 e 6 são descartados
+    $display("\n=== TESTE 6f: commit e flush no mesmo ciclo ===");
+    rob_head = 5'd1;
+    p = U_sb.cptr;
+    despacha(3'b111, 3'b100, 3'b100, 3'b100, 5'd1, 5'd2, 5'd3, 32'd81, 32'd82, 32'd83);
+    despacha(3'b011, 3'b100, 3'b100, 3'b000, 5'd5, 5'd6, 5'd0, 32'd85, 32'd86, 32'd0);
+    resolve(3'b111, 5'd1, 5'd2, 5'd3, 32'h900, 32'h904, 32'h908);
+    espera_escrita(32'h900, 32'd81);
+    espera_escrita(32'h904, 32'd82);
+    cv = 3'b011;
+    flush_ok = 1; flush_rob_id = 5'd4;
+    @(posedge clk); #1;
+    cv = 3'b0; flush_ok = 0;
+    checa(U_sb.cptr === p + 5'd2, "cptr avanca pelo commit (1 e 2)");
+    checa(U_sb.tail === p + 5'd3, "tail depois do Store 3");
+    resolve(3'b011, 5'd5, 5'd6, 5'd0, 32'h914, 32'h918, 32'd0);   // atrasados, ignorados
+    espera_escrita(32'h908, 32'd83);
+    commita(3'b001);
+    ciclos(2);
+    checa_vazio("escritas do teste 6f (sem 5 e 6)");
+    rob_head = 5'd0;
+
     // ── Teste 7: enche até stop, sem commits ──
     $display("\n=== TESTE 7: Enchendo SB ate stop ===");
     begin : enche

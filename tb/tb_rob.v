@@ -294,6 +294,30 @@ initial begin
     checa(U_rob.buffer[28][42] === 1'b1 && U_rob.buffer[31][42] === 1'b1,
           "entradas antes de B e B mantidas");
 
+    //IVAN FEATURE: Commit e flush no mesmo ciclo
+    // rob 0..5; 0, 1 e 2 prontos fazem commit no ciclo em que B = 3 erra
+    $display("\n=== TESTE 14: commit e flush no mesmo ciclo ===");
+    rst = 1; @(posedge clk); #1; rst = 0;
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd1,5'd2,5'd3);   // rob 0,1,2
+    despacha(3'b111, 3'b000,3'b000,3'b000, 5'd4,5'd5,5'd6);   // rob 3 (B),4,5
+    writeback(3'b111, 5'd0,5'd1,5'd2, 32'd10,32'd11,32'd12);  // 0, 1 e 2 prontos
+    wb = 3'b011; rid1 = 5'd3; r1 = 32'd33; rid2 = 5'd4; r2 = 32'd44;  // B e a mais nova 4
+    flush = 1; flush_rob_id = 5'd3;
+    #1;
+    checa(flush_ok === 1'b1, "flush valido com commit no mesmo ciclo");
+    checa(crob_id1 === 5'd0 && crob_id2 === 5'd1 && crob_id3 === 5'd2, "0, 1 e 2 commitando");
+    @(posedge clk); #1;
+    wb = 0; flush = 0;
+    checa(U_rob.head === 6'd3, "head avanca pelo commit (3)");
+    checa(U_rob.tail === 6'd4, "tail = B+1 (4)");
+    checa(U_rob.buffer[3][40] === 1'b1, "B pronto");
+    checa(U_rob.buffer[4][42:40] === 3'b0 && U_rob.buffer[5][42:40] === 3'b0,
+          "entradas mais novas que B limpas");
+    checa(U_rob.buffer[0][42] === 1'b0 && U_rob.buffer[2][42] === 1'b0,
+          "commitadas liberadas");
+    @(posedge clk); #1;
+    checa(U_rob.head === 6'd4 && U_rob.tail === 6'd4, "B commita e o ROB esvazia");
+
     if (erros == 0)
         $display("\nTESTES VERIFICADOS PASSARAM");
     else
