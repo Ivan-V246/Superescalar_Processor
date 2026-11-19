@@ -26,6 +26,10 @@ reg        flush_ok;
 reg  [4:0] flush_rob_id, rob_head;
 reg  [4:0] p;
 
+//IVAN FEATURE: tamanho dos acessos (padrão: palavra)
+reg  [2:0] f3_1 = 3'b010, f3_2 = 3'b010, f3_3 = 3'b010, q_funct3 = 3'b010;
+wire [2:0] mem_funct3;
+
 wire [4:0]  sb_tail;
 wire        q_espera;
 wire        q_hit;
@@ -57,7 +61,10 @@ store_buffer U_sb (
     .mem_addr(mem_addr),
     .mem_dado(mem_dado),
     .stop(stop),
-    .flush_ok(flush_ok), .flush_rob_id(flush_rob_id), .rob_head(rob_head)  //IVAN FEATURE
+    .flush_ok(flush_ok), .flush_rob_id(flush_rob_id), .rob_head(rob_head),  //IVAN FEATURE
+    //IVAN FEATURE: tamanho dos acessos
+    .funct3_1(f3_1), .funct3_2(f3_2), .funct3_3(f3_3),
+    .q_funct3(q_funct3), .mem_funct3(mem_funct3)
 );
 
 always #5 clk = ~clk;
@@ -198,6 +205,20 @@ task consulta;
         end else begin
             $display("PASSOU: %0s (%0s)", nome, obtido == MEM ? "MEM" : "ESPERA");
         end
+    end
+endtask
+
+//IVAN FEATURE: Consulta de um Load de tamanho dado
+task consulta_f3;
+    input [2:0]  _f3;
+    input [4:0]  _idade;
+    input [31:0] _addr;
+    input [1:0]  esperado;
+    input [31:0] esp_dado;
+    input [8*44-1:0] nome;
+    begin
+        q_funct3 = _f3;
+        consulta(_idade, _addr, esperado, esp_dado, nome);
     end
 endtask
 
@@ -392,6 +413,47 @@ initial begin
     ciclos(2);
     checa_vazio("escritas do teste 6d");
     rob_head = 5'd0;
+
+    //IVAN FEATURE: Teste 6e: tamanhos de acesso
+    // S20 sb em 0x601, S21 sh em 0x702, S22 sw em 0x800 (todos mais antigos que o Load)
+    $display("\n=== TESTE 6e: tamanhos ===");
+    t0 = sb_tail;
+    p  = U_sb.tail;
+    f3_1 = 3'b000; f3_2 = 3'b001; f3_3 = 3'b010;
+    despacha(3'b111, 3'b100, 3'b100, 3'b100, 5'd20, 5'd21, 5'd22,
+             32'h12345685, 32'hABCD8123, 32'hAABBCCDD);
+    f3_1 = 3'b010; f3_2 = 3'b010;
+    checa(U_sb.f3[p[3:0]] === 3'b000, "sb guardado");
+    p = p + 5'd1;
+    checa(U_sb.f3[p[3:0]] === 3'b001, "sh guardado");
+    resolve(3'b111, 5'd20, 5'd21, 5'd22, 32'h601, 32'h702, 32'h800);
+
+    consulta_f3(3'b000, t0 + 3, 32'h601, FWD,    32'hFFFFFF85, "lb de sb: extensao de sinal");
+    consulta_f3(3'b100, t0 + 3, 32'h601, FWD,    32'h00000085, "lbu de sb: extensao de zero");
+    consulta_f3(3'b000, t0 + 3, 32'h600, MEM,    0,            "lb no byte vizinho do sb");
+    consulta_f3(3'b010, t0 + 3, 32'h600, ESPERA, 0,            "lw sobre o sb: parcial");
+    consulta_f3(3'b001, t0 + 3, 32'h600, ESPERA, 0,            "lh sobre o sb: parcial");
+    consulta_f3(3'b001, t0 + 3, 32'h702, FWD,    32'hFFFF8123, "lh de sh: extensao de sinal");
+    consulta_f3(3'b101, t0 + 3, 32'h702, FWD,    32'h00008123, "lhu de sh: extensao de zero");
+    consulta_f3(3'b000, t0 + 3, 32'h703, ESPERA, 0,            "lb dentro do sh: parcial");
+    consulta_f3(3'b001, t0 + 3, 32'h700, MEM,    0,            "lh na outra metade do sh");
+    consulta_f3(3'b000, t0 + 3, 32'h800, ESPERA, 0,            "lb dentro do sw: espera");
+    consulta_f3(3'b010, t0 + 3, 32'h800, FWD,    32'hAABBCCDD, "lw de sw");
+    consulta_f3(3'b010, t0 + 3, 32'h804, MEM,    0,            "lw na palavra seguinte");
+    q_funct3 = 3'b010;
+
+    // Escrita na memória com o funct3 de cada Store
+    espera_escrita(32'h601, 32'h12345685);
+    espera_escrita(32'h702, 32'hABCD8123);
+    espera_escrita(32'h800, 32'hAABBCCDD);
+    commita(3'b111);
+    checa(mem_req === 1'b1 && mem_funct3 === 3'b000, "escrita do sb com funct3 000");
+    ciclos(1);
+    checa(mem_req === 1'b1 && mem_funct3 === 3'b001, "escrita do sh com funct3 001");
+    ciclos(1);
+    checa(mem_req === 1'b1 && mem_funct3 === 3'b010, "escrita do sw com funct3 010");
+    ciclos(1);
+    checa_vazio("escritas do teste 6e");
 
     // ── Teste 7: enche até stop, sem commits ──
     $display("\n=== TESTE 7: Enchendo SB ate stop ===");
