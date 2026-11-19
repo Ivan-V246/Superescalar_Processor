@@ -21,6 +21,7 @@ module caminho_desvio (
     // Busca e despacho
     output reg         resolvido,   // instrucao resolvida
     output reg         tomado,      // fluxo muda
+    output reg  [9:0]  pc_desvio,   // IVAN FEATURE - Expõe o pc da instrução para atualização
     output reg  [9:0]  alvo,        // proximo pc
     output reg         errou        // previsao errada
 );
@@ -84,6 +85,7 @@ module caminho_desvio (
             tomado    <= 1'b0;
             alvo      <= 10'b0;
             errou     <= 1'b0;
+            pc_desvio <= 10'b0;
         end else begin
             wb        <= valido;
             rid       <= rob_id;
@@ -92,6 +94,7 @@ module caminho_desvio (
             tomado    <= valido & muda;
             alvo      <= prox[9:0];
             errou     <= valido & ((muda != previu) | (muda & (prox[9:0] != alvo_previsto)));
+            pc_desvio <= pc;
         end
     end
 endmodule
