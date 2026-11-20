@@ -1,30 +1,48 @@
-// Caminho de desvio: resolve JAL, JALR e BEQ..BGEU
+//==============================================================================
+// Caminho de desvio (caminho 3)
+//
+// Resolve JAL, JALR e os condicionais BEQ, BNE, BLT, BGE, BLTU, BGEU.
+// O despacho envia para cá só desvios, em ordem entre si, um por ciclo.
+//
+//   - Recebe a instrução com os operandos certos (da unidade de hazard), o PC
+//     e a previsão feita na busca (previu / alvo_previsto).
+//   - Calcula se o desvio pula e qual é o próximo PC correto.
+//   - Se a direção ou o alvo previstos estiverem errados, sinaliza errou,
+//     e o ROB inicia a recuperação a partir deste desvio.
+//   - Latência de 1 ciclo; aceita uma instrução por ciclo (ready sempre 1).
+//
+// O PC tem 10 bits (MEI com 256 palavras = 1024 bytes): os alvos são
+// calculados em 32 bits e truncados para 10 (módulo 1024).
+//==============================================================================
+
 module caminho_desvio (
     input  wire        clk, rst,
 
-    // Despacho
-    input  wire        valido,
-    input  wire [31:0] instr,
-    input  wire [9:0]  pc,
-    input  wire [31:0] valor_rs1,
-    input  wire [31:0] valor_rs2,
-    input  wire [4:0]  rob_id,
-    input  wire        previu,
-    input  wire [9:0]  alvo_previsto,
-    output wire        ready,
+    //---- Entradas: instrução enviada pelo despacho ----
+    input  wire        valido,          // Há instrução neste ciclo
+    input  wire [31:0] instr,           // Instrução
+    input  wire [9:0]  pc,              // PC da instrução
+    input  wire [31:0] valor_rs1,       // Comparação e base do JALR
+    input  wire [31:0] valor_rs2,       // Comparação
+    input  wire [4:0]  rob_id,          // Posição no ROB
+    input  wire        previu,          // Previsão da busca: 1 = pula
+    input  wire [9:0]  alvo_previsto,   // Alvo previsto (válido se previu = 1)
 
-    // ROB
-    output reg         wb,
-    output reg  [4:0]  rid,
-    output reg  [31:0] r,           // pc + 4 (jal/jalr)
+    output wire        ready,           // Sinal para receber novas instruções; Atualmente, sempre 1
 
-    // Busca e despacho
-    output reg         resolvido,   // instrucao resolvida
-    output reg         tomado,      // fluxo muda
-    output reg  [9:0]  pc_desvio,   // IVAN FEATURE - Expõe o pc da instrução para atualização
-    output reg  [9:0]  alvo,        // proximo pc
-    output reg         errou        // previsao errada
+    //---- Saídas: resultado para o ROB e o hazard (1 ciclo depois) ----
+    output reg         wb,              // Desvio resolvido
+    output reg  [4:0]  rid,             // rob_id dele
+    output reg  [31:0] r,               // rd: pc + 4 (JAL/JALR); 0 nos condicionais
+
+    //---- Saídas: recuperação e atualização do BTB (1 ciclo depois) ----
+    output reg         tomado,          // Pulou (resultado real)
+    output reg  [9:0]  pc_desvio,       // PC do desvio (índice do BTB)
+    output reg  [9:0]  alvo,            // Próximo PC correto: alvo se pulou, pc + 4 se não.
+                                        // Usado direto como novo PC na recuperação
+    output reg         errou            // Previsão errada: pede o flush ao ROB
 );
+
     // Campos da instrucao
     wire [6:0]  opcode = instr[6:0];
     wire [2:0]  funct3 = instr[14:12];
@@ -49,8 +67,8 @@ module caminho_desvio (
         cond = 1'b0;
         if (eh_branch) begin
             case (funct3)
-                3'b000: cond = ($signed(valor_rs1) == $signed(valor_rs2)); // beq
-                3'b001: cond = ($signed(valor_rs1) != $signed(valor_rs2)); // bne
+                3'b000: cond = (valor_rs1 == valor_rs2);                   // beq
+                3'b001: cond = (valor_rs1 != valor_rs2);                   // bne
                 3'b100: cond = ($signed(valor_rs1) <  $signed(valor_rs2)); // blt
                 3'b101: cond = ($signed(valor_rs1) >= $signed(valor_rs2)); // bge
                 3'b110: cond = (valor_rs1 <  valor_rs2);                   // bltu
@@ -81,7 +99,6 @@ module caminho_desvio (
             wb        <= 1'b0;
             rid       <= 5'b0;
             r         <= 32'b0;
-            resolvido <= 1'b0;
             tomado    <= 1'b0;
             alvo      <= 10'b0;
             errou     <= 1'b0;
@@ -90,7 +107,6 @@ module caminho_desvio (
             wb        <= valido;
             rid       <= rob_id;
             r         <= (eh_jal | eh_jalr) ? pc_mais_4 : 32'b0;
-            resolvido <= valido;
             tomado    <= valido & muda;
             alvo      <= prox[9:0];
             errou     <= valido & ((muda != previu) | (muda & (prox[9:0] != alvo_previsto)));

@@ -133,7 +133,7 @@ module processador (input clk, input rst);
     wire [4:0]  p3_rs1, p3_rs2, p3_rob_id;
     wire [31:0] banco_p3_rs1, banco_p3_rs2;
     wire        wb3; wire [4:0] rid3; wire [31:0] r3;
-    wire        d_errou, d_resolvido, d_tomado;
+    wire        d_errou, d_tomado;   //IVAN FEATURE: sem d_resolvido (igual ao wb3)
     wire [4:0]  rob_head;
 
     despacho desp (
@@ -278,7 +278,7 @@ module processador (input clk, input rst);
         .rob_id(p3_rob_id), .previu(p3_previu), .alvo_previsto(p3_alvo),
         .ready(p3_ready),
         .wb(wb3), .rid(rid3), .r(r3),
-        .resolvido(d_resolvido), .tomado(d_tomado), .alvo(alvo_desvio), .errou(d_errou)
+        .tomado(d_tomado), .alvo(alvo_desvio), .errou(d_errou)
     );
 
     // ---- ROB ----

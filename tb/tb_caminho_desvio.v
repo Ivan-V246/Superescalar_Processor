@@ -14,7 +14,7 @@ wire        ready;
 wire        wb;
 wire [4:0]  rid;
 wire [31:0] r;
-wire        resolvido, tomado, errou;
+wire        tomado, errou;   //IVAN FEATURE: sem resolvido (igual ao wb)
 wire [9:0]  alvo;
 
 integer erros;
@@ -27,7 +27,7 @@ caminho_desvio U_cd (
     .previu(previu), .alvo_previsto(alvo_previsto),
     .ready(ready),
     .wb(wb), .rid(rid), .r(r),
-    .resolvido(resolvido), .tomado(tomado), .alvo(alvo), .errou(errou)
+    .tomado(tomado), .alvo(alvo), .errou(errou)
 );
 
 always #5 clk = ~clk;
@@ -51,11 +51,11 @@ task testa;
         previu = _previu; alvo_previsto = _alvo_previsto;
         @(posedge clk); #1;
         valido = 1'b0;
-        if (wb !== 1'b1 || resolvido !== 1'b1 || rid !== _id || r !== r_esp ||
+        if (wb !== 1'b1 || rid !== _id || r !== r_esp ||
             tomado !== tomado_esp || alvo !== alvo_esp || errou !== errou_esp) begin
             erros = erros + 1;
-            $display("  [FALHA] %0s: wb=%b resolvido=%b rid=%0d r=%0d tomado=%b alvo=%0d errou=%b",
-                     nome, wb, resolvido, rid, r, tomado, alvo, errou);
+            $display("  [FALHA] %0s: wb=%b rid=%0d r=%0d tomado=%b alvo=%0d errou=%b",
+                     nome, wb, rid, r, tomado, alvo, errou);
             $display("          esperado: rid=%0d r=%0d tomado=%b alvo=%0d errou=%b",
                      _id, r_esp, tomado_esp, alvo_esp, errou_esp);
         end else
@@ -67,12 +67,12 @@ endtask
 task testa_vazio;
     input [8*26-1:0] nome;
     begin
-        if (wb !== 1'b0 || resolvido !== 1'b0 || tomado !== 1'b0 || errou !== 1'b0) begin
+        if (wb !== 1'b0 || tomado !== 1'b0 || errou !== 1'b0) begin
             erros = erros + 1;
-            $display("  [FALHA] %0s: wb=%b resolvido=%b tomado=%b errou=%b",
-                     nome, wb, resolvido, tomado, errou);
+            $display("  [FALHA] %0s: wb=%b tomado=%b errou=%b",
+                     nome, wb, tomado, errou);
         end else
-            $display("  [OK]    %0s: wb=0 resolvido=0 tomado=0 errou=0", nome);
+            $display("  [OK]    %0s: wb=0 tomado=0 errou=0", nome);
     end
 endtask
 
