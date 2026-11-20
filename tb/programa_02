@@ -1,0 +1,81 @@
+// programa_02: teste de ordem entre loads e stores
+// Memoria de dados iniciada pelo testbench com mem[i] = i (byte)
+// Preparacao: enderecos e dados (separados por nops, sem dependencias)
+01000093  // addi x1, x0, 16
+07700113  // addi x2, x0, 0x77
+05500193  // addi x3, x0, 0x55
+02000213  // addi x4, x0, 32
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+// A: load antigo segura o commit do store; lw seguinte no mesmo endereco deve ler 0x77
+00002283  // lw x5, 0(x0)
+00000013  // nop
+00000013  // nop
+00000013  // nop
+0020a023  // sw x2, 0(x1)
+0000a303  // lw x6, 0(x1)
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+// B: store e load em enderecos diferentes; lw deve ler o valor inicial
+00322023  // sw x3, 0(x4)
+00422383  // lw x7, 4(x4)
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+// C: store seguido de load no mesmo endereco
+0030a023  // sw x3, 0(x1)
+0000a403  // lw x8, 0(x1)
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+// D: load antes de store no mesmo endereco; o store mais novo nao afeta o load
+00022483  // lw x9, 0(x4)
+00222023  // sw x2, 0(x4)
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+// E: dois stores no mesmo endereco; o load le o mais novo
+00202423  // sw x2, 8(x0)
+00302423  // sw x3, 8(x0)
+00802503  // lw x10, 8(x0)
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop
+00000013  // nop

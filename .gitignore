@@ -1,3 +1,5 @@
 *.vcd
 *.vvp
 *.out
+relatorios
+.aux
