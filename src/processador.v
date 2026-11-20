@@ -34,12 +34,10 @@ module processador (input clk, input rst);
     wire [63:0] mei_saida1;
     wire [63:0] mei_saida2;
 
-    //IVAN FEATURE: PC e previsão de cada slot da busca, fora da MEI.
-    //A saída da MEI corresponde ao pc do ciclo, então os PCs dos slots vêm dele.
-    //Sem BTB ligado, a previsão é sempre "não pula" (a integração do BTB troca isto).
-    wire [9:0] mei_pc0 = pc;
-    wire [9:0] mei_pc1 = pc + 10'd4;
-    wire [9:0] mei_pc2 = pc + 10'd8;
+    //IVAN FEATURE: PC de cada slot (vem da MEI, junto com a instrução) e previsão
+    //de desvio (fora da MEI). Sem BTB ligado, a previsão é sempre "não pula": a
+    //integração troca estes fios pelas saídas do BTB, consultado com mei_pc0.
+    wire [9:0] mei_pc0, mei_pc1, mei_pc2;
     wire       mei_previu0 = 1'b0, mei_previu1 = 1'b0, mei_previu2 = 1'b0;
     wire [9:0] mei_alvo0 = 10'd0, mei_alvo1 = 10'd0, mei_alvo2 = 10'd0;
 
@@ -49,7 +47,8 @@ module processador (input clk, input rst);
         .pc(pc_prox),
         .saida0(mei_saida0),
         .saida1(mei_saida1),
-        .saida2(mei_saida2)
+        .saida2(mei_saida2),
+        .pc0(mei_pc0), .pc1(mei_pc1), .pc2(mei_pc2)   //IVAN FEATURE
     );
 
     // ---- fios entre despacho, banco e caminhos ----

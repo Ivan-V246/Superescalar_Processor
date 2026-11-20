@@ -12,7 +12,8 @@ module tb_MEI;
     wire [31:0] saida1;
     wire [31:0] saida2;
 
-    //IVAN FEATURE: A MEI é só memória (sem pc0..2, previu e alvo)
+    wire  [9:0] pc0, pc1, pc2;
+    //IVAN FEATURE: previu e alvo saíram da MEI (a previsão vem do BTB, fora dela)
 
     // Instancia o DUT (nova versao da MEI sem numero de ordem)
     MEI #(
@@ -23,7 +24,10 @@ module tb_MEI;
         .pc(pc),
         .saida0(saida0),
         .saida1(saida1),
-        .saida2(saida2)
+        .saida2(saida2),
+        .pc0(pc0),
+        .pc1(pc1),
+        .pc2(pc2)
     );
 
     // Clock de 10ns (100 MHz)
@@ -49,27 +53,31 @@ module tb_MEI;
         input        esperar_erro;
         reg          falhou;
         begin
-            //IVAN FEATURE: só as instruções (pc0..2, previu e alvo saíram da MEI)
             falhou = (saida0 !== exp0) ||
                      (saida1 !== exp1) ||
-                     (saida2 !== exp2);
+                     (saida2 !== exp2) ||
+                     (pc0    !== pc_esperado) ||
+                     (pc1    !== (pc_esperado + 10'd4)) ||
+                     (pc2    !== (pc_esperado + 10'd8));   //IVAN FEATURE: sem previu/alvo
 
             if (falhou) begin
                 if (esperar_erro) begin
                     erros_esperados_falha = erros_esperados_falha + 1;
-                    $display("[FALHA ESPERADA @ t=%0t] pc=%0d | obtido=(%h, %h, %h) | esperado=(%h, %h, %h)",
-                             $time, pc, saida0, saida1, saida2, exp0, exp1, exp2);
+                    $display("[FALHA ESPERADA @ t=%0t] pc=%0d | obtido=(%h, %h, %h) pcs=(%0d,%0d,%0d) | esperado=(%h, %h, %h) pcs=(%0d,%0d,%0d)",
+                             $time, pc, saida0, saida1, saida2, pc0, pc1, pc2,
+                             exp0, exp1, exp2, pc_esperado, pc_esperado+10'd4, pc_esperado+10'd8);
                 end else begin
                     erros_inesperados = erros_inesperados + 1;
-                    $display("[ERRO INESPERADO @ t=%0t] pc=%0d | obtido=(%h, %h, %h) | esperado=(%h, %h, %h)",
-                             $time, pc, saida0, saida1, saida2, exp0, exp1, exp2);
+                    $display("[ERRO INESPERADO @ t=%0t] pc=%0d | obtido=(%h, %h, %h) pcs=(%0d,%0d,%0d) | esperado=(%h, %h, %h) pcs=(%0d,%0d,%0d)",
+                             $time, pc, saida0, saida1, saida2, pc0, pc1, pc2,
+                             exp0, exp1, exp2, pc_esperado, pc_esperado+10'd4, pc_esperado+10'd8);
                 end
             end else begin
                 if (esperar_erro) begin
                     $display("[AVISO @ t=%0t] Esperava-se resultado errado, mas bateu com o esperado!", $time);
                 end else begin
-                    $display("[OK @ t=%0t] pc=%0d -> saidas=(%h, %h, %h)",
-                             $time, pc, saida0, saida1, saida2);
+                    $display("[OK @ t=%0t] pc=%0d -> saidas=(%h, %h, %h), pcs=(%0d, %0d, %0d)",
+                             $time, pc, saida0, saida1, saida2, pc0, pc1, pc2);
                 end
             end
         end
@@ -95,14 +103,14 @@ module tb_MEI;
         // 1. Teste de Reset (todos os PCs, saidas e previsoes zerados)
         // ---------------------------------------------------------
         passo_clock();
-        //IVAN FEATURE: só as instruções (pc0..2, previu e alvo saíram da MEI)
-        if ((saida0 !== 32'h0) || (saida1 !== 32'h0) || (saida2 !== 32'h0)) begin
+        if ((saida0 !== 32'h0) || (saida1 !== 32'h0) || (saida2 !== 32'h0) ||
+            (pc0    !== 10'd0) || (pc1    !== 10'd0) || (pc2    !== 10'd0)) begin   //IVAN FEATURE: sem previu/alvo
             erros_inesperados = erros_inesperados + 1;
-            $display("[ERRO INESPERADO @ t=%0t] Falha no reset: saidas=(%h,%h,%h)",
-                     $time, saida0, saida1, saida2);
+            $display("[ERRO INESPERADO @ t=%0t] Falha no reset: saidas=(%h,%h,%h) pcs=(%0d,%0d,%0d)",
+                     $time, saida0, saida1, saida2, pc0, pc1, pc2);
         end else begin
-            $display("[OK @ t=%0t] Reset verificado: saidas=(%h,%h,%h)",
-                     $time, saida0, saida1, saida2);
+            $display("[OK @ t=%0t] Reset verificado: saidas=(%h,%h,%h), pcs=(%0d,%0d,%0d)",
+                     $time, saida0, saida1, saida2, pc0, pc1, pc2);
         end
 
         // Libera o reset para iniciar a operacao normal
@@ -142,7 +150,14 @@ module tb_MEI;
         passo_clock();
         checa_bloco(10'd12, 32'hA000_0003, 32'hA000_0004, 32'hA000_0005, 1'b1);
 
-        //IVAN FEATURE: Caso Errado C (pc1 incorreto) removido: pc1 saiu da MEI
+        // Caso Errado C: Esperar pc1 incorreto (ex.: +2 em vez de +4)
+        pc = 10'd4;
+        passo_clock();
+        if (pc1 !== 10'd6) begin
+            erros_esperados_falha = erros_esperados_falha + 1;
+            $display("[FALHA ESPERADA @ t=%0t] pc=%0d | pc1 obtido=%0d != pc1 esperado_errado=6",
+                     $time, pc, pc1);
+        end
 
         // Caso Errado D: Acesso proximo ao limite superior da memoria (pc = 1020 -> palavra 255, +1 e +2 estouram TAMANHO=256)
         pc = 10'd1020;
