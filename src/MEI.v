@@ -18,17 +18,6 @@ module MEI #(
     output reg [9:0] alvo0, alvo1, alvo2
 );
     reg [31:0] memoria [TAMANHO-1:0]; // largura * profundidade
-    reg [31:0] contador;      // numero de ordem da primeira palavra do grupo atual
-    reg [9:0] pc_ant;         // pc da ultima palavra do grupo anterior
-
-    //IVAN FEATURE: Expõe pcs para controle de fluxo
-    output reg [9:0] pc0, pc1, pc2,
-
-    //IVAN FEATURE: Previsão de desvio de cada slot (sem BTB: sempre não pula)
-    output reg       previu0, previu1, previu2,
-    output reg [9:0] alvo0, alvo1, alvo2
-);
-    reg [31:0] memoria [TAMANHO-1:0]; // largura * profundidade
 
     always @(posedge clk) begin
         if (rst) begin
