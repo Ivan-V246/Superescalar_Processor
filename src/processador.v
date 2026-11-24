@@ -59,6 +59,7 @@ module processador (input clk, input rst);
     wire [31:0] p1_rs1_val, p1_rs2_val;      // banco → caminho e despacho: valores lidos
     wire [31:0] p2_rs1_val, p2_rs2_val;
     wire        p1_ready, p2_ready;          // caminho → despacho: "estou livre"
+    wire [9:0]  p1_pc, p2_pc;                // despacho → caminho: PC da instrução (AUIPC)
     wire [4:0]  rob_id1, rob_id2;            // despacho → caminho: posição no ROB
 
     // saídas dos caminhos
@@ -163,7 +164,7 @@ module processador (input clk, input rst);
         .path1_ready(p1_ready), .path2_ready(p2_ready),
         .path1_valid(p1_valid), .path2_valid(p2_valid),
         .path1_instr(p1_instr), .path2_instr(p2_instr),
-        .path1_ordem(), .path2_ordem(), .path1_pc(), .path2_pc(),
+        .path1_ordem(), .path2_ordem(), .path1_pc(p1_pc), .path2_pc(p2_pc),
         .path1_rs1_addr(p1_rs1), .path1_rs2_addr(p1_rs2),
         .path2_rs1_addr(p2_rs1), .path2_rs2_addr(p2_rs2),
         .path1_rob_id(p1_rob_id), .path2_rob_id(p2_rob_id),
@@ -257,6 +258,7 @@ module processador (input clk, input rst);
         .instr(p1_instr),
         .valor_rs1(p1_rs1_val), .valor_rs2(p1_rs2_val),
         .rob_id(p1_rob_id),     //IVAN FEATURE: rob_id do envio, não da alocação
+        .pc(p1_pc),             //PEDRO: PC da instrução, para o AUIPC
         .ready(p1_ready),
         .wb(wb1), .rid(rid1), .r(r1)
     );
@@ -267,6 +269,7 @@ module processador (input clk, input rst);
         .instr(p2_instr),
         .valor_rs1(p2_rs1_val), .valor_rs2(p2_rs2_val),
         .rob_id(p2_rob_id),     //IVAN FEATURE: rob_id do envio, não da alocação
+        .pc(p2_pc),             //PEDRO: PC da instrução, para o AUIPC
         .ready(p2_ready),
         .wb(wb2), .rid(rid2), .r(r2)
     );
@@ -310,7 +313,7 @@ module processador (input clk, input rst);
         .stop(rob_stop),
         .rob_tail(rob_tail),
 
-        //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
+        // recuperação de desvio: o errou do caminho 3 dispara o flush
         .flush(d_errou), .flush_rob_id(rid3), .flush_ok(flush_ok), .rob_head(rob_head)
     );
 
@@ -334,7 +337,7 @@ module processador (input clk, input rst);
         .mem_req(sb_mem_req), .mem_addr(sb_mem_addr), .mem_dado(sb_mem_dado),
         .stop(sb_stop),
 
-        //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
+        // recuperação de desvio: descarta as entradas mais novas que o desvio
         .flush_ok(flush_ok), .flush_rob_id(rid3), .rob_head(rob_head),
 
         //IVAN FEATURE: tamanho dos acessos
@@ -357,7 +360,7 @@ module processador (input clk, input rst);
         .stop(lb_stop),
         .lb_tail(lb_tail),  //IVAN FEATURE
 
-        //IVAN FEATURE: recuperação ainda desligada (falta ligar o caminho de desvio)
+        // recuperação de desvio: descarta as entradas mais novas que o desvio
         .flush_ok(flush_ok), .flush_rob_id(rid3), .rob_head(rob_head),
 
         //IVAN FEATURE: tamanho dos acessos

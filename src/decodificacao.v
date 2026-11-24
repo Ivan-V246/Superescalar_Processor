@@ -6,6 +6,7 @@
 //   - Loads:             LB, LH, LW, LBU, LHU
 //   - Stores:            SB, SH, SW
 //   - Desvios:           BEQ, BNE, BLT, BGE, BLTU, BGEU, JAL, JALR
+//   - Tipo U:            LUI, AUIPC (rd = imm, rd = pc + imm; o caminho comum calcula)
 //
 // Fim de programa: ECALL, EBREAK e a instrucao toda zero (que o RISC-V define
 // como ilegal justamente para detectar memoria vazia) marcam parada = 1 e
@@ -13,7 +14,7 @@
 // Em simulacao, uma instrucao com bits indefinidos (memoria nao carregada)
 // tambem e tratada como parada; em sintese essa comparacao e sempre falsa.
 //
-// Qualquer outra instrucao nao reconhecida (LUI, AUIPC, FENCE, CSR ou lixo)
+// Qualquer outra instrucao nao reconhecida (FENCE, CSR ou lixo)
 // e marcada com ilegal = 1 e transformada em NOP: segue valida para o
 // despacho, mas com rd = rs1 = rs2 = 0 e imediato 0. O caminho a executa,
 // o ROB a aposenta e a escrita cai em x0, sem efeito.
@@ -32,7 +33,8 @@
 //   alu_op      -> operacao da ULA (ADD para enderecos de load/store e para desvios).
 //   mem_funct3  -> funct3 da instrucao: tamanho do acesso nos loads e stores,
 //                  condicao nos branches. 0 no JAL (que nao tem funct3) e nas ilegais.
-//   imm         -> imediato ja estendido para 32 bits, no formato da instrucao.
+//   imm         -> imediato ja estendido para 32 bits, no formato da instrucao
+//                  (no tipo U, os 20 bits de cima com 12 zeros embaixo).
 //                  Em SLLI, SRLI e SRAI traz so o shamt. 0 no tipo R e nas ilegais.
 
 module decoder (
@@ -75,6 +77,8 @@ module decoder (
     localparam [6:0] OP_BRANCH = 7'b1100011;
     localparam [6:0] OP_JAL    = 7'b1101111;
     localparam [6:0] OP_JALR   = 7'b1100111;
+    localparam [6:0] OP_LUI    = 7'b0110111;
+    localparam [6:0] OP_AUIPC  = 7'b0010111;
 
     // Campos da instrucao.
     wire [6:0] opcode = instr[6:0];
@@ -124,6 +128,7 @@ module decoder (
             OP_BRANCH: reconhecida = (funct3 != 3'b010 && funct3 != 3'b011);
             OP_JAL:    reconhecida = 1'b1;
             OP_JALR:   reconhecida = (funct3 == 3'b000);
+            OP_LUI, OP_AUIPC: reconhecida = 1'b1;
             default:   reconhecida = 1'b0;
         endcase
     end
@@ -189,6 +194,13 @@ module decoder (
                     rs2    = 5'd0;
                     mem_funct3 = 3'd0;                   // bits [14:12] sao o imediato
                     imm    = imm_J;                      // alvo = pc + imm, rd = pc + 4
+                end
+
+                OP_LUI, OP_AUIPC: begin
+                    rs1        = 5'd0;                   // não lê registradores
+                    rs2        = 5'd0;
+                    mem_funct3 = 3'd0;                   // bits [14:12] são o imediato
+                    imm        = {instr[31:12], 12'd0};  // LUI: rd = imm; AUIPC: rd = pc + imm
                 end
 
                 default: begin                           // OP_JALR

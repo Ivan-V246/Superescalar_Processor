@@ -21,7 +21,8 @@ def reto():
     if t<0.45:
         f7,f3=random.choice([(0,0),(0x20,0),(0,4),(0,6),(0,7),(0,1),(0,5),(0,2),(0,3),(0x20,5)])
         prog.append(R(f7,rr(),rr(),f3,random.randint(1,7)))
-    elif t<0.75: prog.append(I(random.randint(-2048,2047),rr(),0,random.randint(1,7)))
+    elif t<0.70: prog.append(I(random.randint(-2048,2047),rr(),0,random.randint(1,7)))
+    elif t<0.75: prog.append((random.randint(0,0xfffff)<<12)|(random.randint(1,7)<<7)|random.choice([0x37,0x17]))  # LUI/AUIPC
     elif t<0.88: prog.append(S(random.choice([0,4,8,12]),rr(),0,2))
     else: prog.append(I(random.choice([0,4,8,12]),0,2,random.randint(1,7),0x03))
 N=int(sys.argv[2])
@@ -64,6 +65,8 @@ while True:
         v={0:(a-b if f7 else a+b),1:a<<(b&31),2:int(sx(a,32)<sx(b,32)),3:int(a<b),4:a^b,5:(sx(a,32)>>(b&31) if f7 else a>>(b&31)),6:a|b,7:a&b}[f3]
         regs[rd]=v&M
     elif op==0x13: regs[rd]=(a+sx(ins>>20,12))&M
+    elif op==0x37: regs[rd]=ins&0xfffff000
+    elif op==0x17: regs[rd]=(pc+(ins&0xfffff000))&M
     elif op==0x03: regs[rd]=mem.get((a+sx(ins>>20,12))&M,0)
     elif op==0x23: mem[(a+sx(((ins>>25)<<5)|((ins>>7)&31),12))&M]=b
     elif op==0x63:
