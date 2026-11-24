@@ -46,7 +46,6 @@ store_buffer U_sb (
     .v(v),
     .dst1(dst1), .dst2(dst2), .dst3(dst3),
     .rob_id1(rob_id1), .rob_id2(rob_id2), .rob_id3(rob_id3),
-    .dado1(dado1), .dado2(dado2), .dado3(dado3),
     .wb(wb),
     .rid1(rid1), .rid2(rid2), .rid3(rid3),
     .r1(r1), .r2(r2), .r3(r3),

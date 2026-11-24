@@ -48,7 +48,7 @@ load_buffer U_lb (
     .flush_ok(flush_ok), .flush_rob_id(flush_rob_id), .rob_head(rob_head),  //IVAN FEATURE
     .mem_req(mem_req), .mem_data(mem_data), .mem_done(mem_done),
     .lb_done(lb_done), .lb_rid(lb_rid),
-    .cv(cv), .crob_id1(crob_id1), .crob_id2(crob_id2), .crob_id3(crob_id3),
+    .cv(cv),
     .lb_dado1(lb_dado1), .lb_dado2(lb_dado2), .lb_dado3(lb_dado3),
     .stop(stop),
     //IVAN FEATURE: tamanho dos acessos
@@ -68,11 +68,9 @@ end
 
 always @(posedge clk) begin
     #1;
-    if(|U_lb.commit1)
-        $display("  [COMMIT] crob=%0d/%0d/%0d head_rob_id=%0d commit1=%b commit2=%b commit3=%b",
-            crob_id1, crob_id2, crob_id3,
-            U_lb.buffer[U_lb.head[3:0]][36:32],
-            U_lb.commit1, U_lb.commit2, U_lb.commit3);
+    if(|cv)
+        $display("  [COMMIT] cv=%b head_rob_id=%0d aposentados=%0d",
+            cv, U_lb.rob_id[U_lb.head[3:0]], U_lb.aposentados);
 end
 
 // ─── Tasks ───────────────────────────────────────────────
@@ -268,7 +266,7 @@ initial begin
     checa(mem_req === 1'b0, "forwarding nao acessa a memoria");
     @(posedge clk); #1;
     q_hit = 0; q_dado = 32'd0; lready = 0;
-    checa(U_lb.buffer[U_lb.head[3:0]][31:0] === 32'd777, "dado do forwarding gravado");
+    checa(U_lb.dado[U_lb.head[3:0]] === 32'd777, "dado do forwarding gravado");
     checa(lrid === 5'd30, "mem_ptr avancou para o proximo Load");
 
     lready = 1; #1;
@@ -344,7 +342,7 @@ initial begin
     mem_done = 0; flush_ok = 0; lready = 0;
     checa(U_lb.mem_ptr === p0 + 5'd3 && U_lb.tail === p0 + 5'd3, "mantem 22, descarta 24");
     p0 = p0 + 5'd2;  // posição do Load 22 (o buffer usa só os 4 bits de baixo)
-    checa(U_lb.buffer[p0[3:0]][31:0] === 32'd55, "dado do Load antigo gravado");
+    checa(U_lb.dado[p0[3:0]] === 32'd55, "dado do Load antigo gravado");
 
     // Esvazia: commit de 11, 13 e 22
     commita(3'b111, 5'd11, 5'd13, 5'd22);
@@ -388,7 +386,7 @@ initial begin
     checa(lrid === 5'd3, "proximo Load a executar e o 3");
     executa_load(32'h28, 32'd73, 0, 1);                     // Load 3
     p0 = p0 + 5'd2;
-    checa(U_lb.buffer[p0[3:0]][31:0] === 32'd73, "dado do Load 3 gravado");
+    checa(U_lb.dado[p0[3:0]] === 32'd73, "dado do Load 3 gravado");
     commita(3'b001, 5'd3, 5'd0, 5'd0);
     checa(U_lb.head === U_lb.tail && U_lb.mem_ptr === U_lb.tail, "Load 3 aposentado, buffer vazio");
     rob_head = 5'd0;

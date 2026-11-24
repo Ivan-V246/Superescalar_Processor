@@ -319,7 +319,6 @@ module processador (input clk, input rst);
         .v(disp_v),
         .dst1(disp_dst1), .dst2(disp_dst2), .dst3(disp_dst3),
         .rob_id1(rob_id1), .rob_id2(rob_id2), .rob_id3(rob_id3),
-        .dado1(disp_dado1), .dado2(disp_dado2), .dado3(disp_dado3),
         // endereços, vindos dos caminhos
         .wb({1'b0, wb2, wb1}),
         .rid1(rid1), .rid2(rid2), .rid3(5'd0),
@@ -354,7 +353,6 @@ module processador (input clk, input rst);
         .mem_req(lb_mem_req), .mem_data(lb_mem_data), .mem_done(lb_mem_done),
         .lb_done(lb_done), .lb_rid(lb_rid),
         .cv(cv_load),
-        .crob_id1(commit_rob_id1), .crob_id2(commit_rob_id2), .crob_id3(commit_rob_id3),
         .lb_dado1(lb_dado1), .lb_dado2(lb_dado2), .lb_dado3(lb_dado3),
         .stop(lb_stop),
         .lb_tail(lb_tail),  //IVAN FEATURE
