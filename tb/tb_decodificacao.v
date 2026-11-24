@@ -2,7 +2,7 @@
 
 // Testbench do decodificador.
 //   Parte 1: casos dirigidos, um por classe de instrucao, com imediatos
-//            positivos e negativos, ilegais (viram NOP) e paradas.
+//            positivos e negativos, LUI/AUIPC, ilegais (viram NOP) e paradas.
 //   Parte 2: 20000 instrucoes aleatorias comparadas com um modelo de
 //            referencia escrito aqui, de forma independente do DUT.
 module tb_decodificacao;
@@ -105,6 +105,8 @@ module tb_decodificacao;
             end else if (op == 7'h6F) begin
                 m_il = 0; m_desv = 1; m_rd = x[11:7];
                 m_imm = {{12{x[31]}}, x[19:12], x[20], x[30:21], 1'b0};
+            end else if (op == 7'h37 || op == 7'h17) begin
+                m_il = 0; m_rd = x[11:7]; m_imm = {x[31:12], 12'd0};
             end else if (op == 7'h67 && f3 == 0) begin
                 m_il = 0; m_desv = 1; m_rs1 = x[19:15]; m_rd = x[11:7]; m_f3 = f3;
                 m_imm = {{20{x[31]}}, x[31:20]};
@@ -127,7 +129,7 @@ module tb_decodificacao;
                 6: x[6:0] = 7'h63;
                 7: x[6:0] = 7'h6F;
                 8: x[6:0] = 7'h67;
-                default: ;  // totalmente aleatoria (quase sempre ilegal)
+                default: x[6:0] = (x[31]) ? 7'h37 : (x[30] ? 7'h17 : x[6:0]);  // LUI, AUIPC ou aleatoria
             endcase
             aleatoria = x;
         end
@@ -175,9 +177,11 @@ module tb_decodificacao;
         instr = I(7'h67, 12'hFFE, 6, 3'b000, 1);
           confere("JALR -2",       0, 0, 1, 3'b000, 6,  0,  1,  0, 3'b000, 32'hFFFFFFFE);
         instr = 32'h123450B7;   // LUI x1, 0x12345
-          confere("LUI (ilegal)",  0, 1, 0, 3'b000, 0,  0,  0,  0, 3'b000, 0);
-        instr = 32'h00000097;   // AUIPC x1, 0
-          confere("AUIPC (ilegal)",0, 1, 0, 3'b000, 0,  0,  0,  0, 3'b000, 0);
+          confere("LUI",           0, 0, 0, 3'b000, 0,  0,  1,  0, 3'b000, 32'h12345000);
+        instr = 32'hFFFFF137;   // LUI x2, 0xFFFFF (imediato com bit de sinal)
+          confere("LUI negativo",  0, 0, 0, 3'b000, 0,  0,  2,  0, 3'b000, 32'hFFFFF000);
+        instr = 32'h00001197;   // AUIPC x3, 1
+          confere("AUIPC",         0, 0, 0, 3'b000, 0,  0,  3,  0, 3'b000, 32'h00001000);
         instr = 32'h00000073;   // ECALL
           confere("ECALL (parada)",1, 0, 0, 3'b000, 0,  0,  0,  0, 3'b000, 0);
         instr = R(7'h20, 3, 2, 3'b110, 1);   // OR com funct7 errado
