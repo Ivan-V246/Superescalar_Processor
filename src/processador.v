@@ -306,7 +306,6 @@ module processador (input clk, input rst);
 
         // loads e stores
         .lrid(lrid), .lready(lready), .laddr(laddr),
-        .srid(5'd0), .saddr(),                   // o store buffer guarda o próprio endereço
         .lb_done(lb_done), .lb_rid(lb_rid),
 
         // para o despacho

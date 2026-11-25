@@ -1,14 +1,25 @@
-//IVAN FEATURE: Branch Target Buffer
+//==============================================================================
+// BTB — Branch Target Buffer
 //
-//Na busca, prevê para cada slot do grupo (pc, pc+4, pc+8) se ele é um desvio
-//que pula e para onde. Aprende com os desvios resolvidos pelo caminho de desvio.
+// Na busca, prevê para cada slot do grupo (pc, pc+4, pc+8) se ele é um desvio
+// que pula e para onde. Aprende com os desvios resolvidos pelo caminho de desvio.
 //
-//32 posições de mapeamento direto:
-//  índice = pc[6:2]  (pc[1:0] é sempre 00)
-//  tag    = pc[9:7]  (diferencia os PCs que caem na mesma posição)
+//   - Consulta (combinacional): com o pc do grupo que a MEI acabou de entregar
+//     (mei_pc0), devolve previsão e alvo dos três slots no mesmo ciclo.
+//   - Atualização (na borda do clock): um desvio resolvido por ciclo (wb3).
 //
-//Contador de 2 bits com saturação: 00 e 01 preveem "não pula", 10 e 11 "pula".
-//Uma posição nova nasce em 01 e recebe o resultado logo em seguida.
+// 32 posições de mapeamento direto:
+//   índice = pc[6:2]  (pc[1:0] é sempre 00)
+//   tag    = pc[9:7]  (diferencia os PCs que caem na mesma posição)
+//
+// Contador de 2 bits com saturação: 00 e 01 preveem "não pula", 10 e 11 "pula".
+// Uma posição nova nasce em 01 e já recebe o resultado do desvio que a criou.
+// O alvo só é gravado quando o desvio pula (é o único caso em que é usado).
+//
+// Uma previsão errada não quebra nada: o caminho de desvio detecta e a
+// recuperação corrige. O BTB só afeta o desempenho.
+//==============================================================================
+
 module btb (
     input  wire       clk, rst,
 
@@ -21,8 +32,9 @@ module btb (
     input  wire       upd_valid,                 //Um desvio foi resolvido
     input  wire [9:0] upd_pc,                    //PC desse desvio
     input  wire       upd_tomado,                //Se pulou
-    input  wire [9:0] upd_alvo                  //Para onde pulou
+    input  wire [9:0] upd_alvo                   //Para onde pulou
 );
+
     //Tabela
     reg        valido [0:31];
     reg [2:0]  tag    [0:31];
@@ -43,9 +55,9 @@ module btb (
     assign alvo2 = alvo[pc_s2[6:2]];
 
     //Atualização
-    wire [4:0] pos_upd   = upd_pc[6:2];
-    wire       nova = !valido[pos_upd] || (tag[pos_upd] != upd_pc[9:7]);  //Posição vazia ou de outro desvio
-    wire [1:0] atual = nova ? 2'b01 : estado[pos_upd];                //Posição nova nasce em 01
+    wire [4:0] pos_upd = upd_pc[6:2];
+    wire       nova    = !valido[pos_upd] || (tag[pos_upd] != upd_pc[9:7]);  //Posição vazia ou de outro desvio
+    wire [1:0] atual   = nova ? 2'b01 : estado[pos_upd];                     //Posição nova nasce em 01
 
     reg [1:0] proximo;
     always @(*) begin

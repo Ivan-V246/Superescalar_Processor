@@ -1,60 +1,89 @@
+//==============================================================================
+// ROB — Reorder Buffer
+//
+// Guarda as instruções desde a alocação até o commit, em ordem de programa, e
+// as aposenta em ordem: até 3 por ciclo, a partir do head, enquanto estiverem
+// prontas.
+//
+//   - Alocação (em ordem, na entrada da fila do despacho): até 3 por ciclo, nas
+//     posições tail, tail+1, tail+2. O rob_id de cada instrução é a sua posição
+//     (o despacho o calcula a partir de rob_tail).
+//   - Resultado: chega pelo wb dos caminhos, identificado pelo rob_id.
+//     Loads: o wb traz o endereço (addr_ready); o Load Buffer lê esse endereço
+//     (lrid/laddr) e avisa quando terminou (lb_done), e só então fica pronto.
+//     O dado do Load vai ao banco pelo Load Buffer, não pelo ROB.
+//   - Commit: expõe destino, rd e resultado das instruções que saem (c*), e o
+//     rob_id delas (crob_id*) para o hazard.
+//   - Recuperação: quando o caminho de desvio erra (flush), valida o desvio B
+//     (ainda ocupado?), volta o tail para B+1 e limpa as entradas mais novas.
+//     Repassa flush_ok e rob_head para as outras unidades.
+//
+// Ponteiros (6 bits: o bit extra distingue cheio de vazio; 32 posições):
+//   head → próxima instrução a commitar
+//   tail → próxima posição livre
+//   [head, tail) → ocupadas
+//
+// Idade: as unidades medem a idade de uma entrada pela distância ao head:
+//   uma entrada é mais nova que B se (rob_id - rob_head) > (flush_rob_id - rob_head)
+//
+// Resultados que chegam para posições livres (instruções já descartadas) são
+// ignorados. Premissa: uma posição liberada não é realocada antes de o
+// resultado atrasado chegar (os caminhos levam 1 ciclo; a realocação leva mais).
+//
+// stop: mais de 29 posições ocupadas, porque até 3 instruções podem ser
+// alocadas no mesmo ciclo.
+//
+// Premissa: o despacho entrega os slots válidos em sequência (v = 001, 011 ou
+// 111) e o slot k recebe o rob_id tail + k - 1; a alocação aqui não é compactada.
+//==============================================================================
+
 module rob(
-    input wire clk, rst,                    //Clock e Reset
+    input wire clk, rst,
 
-    //Instruções que vem para serem adicionadas ao ROB
-    input wire [2:0]  v,                    //Instruções vinda dos despachos são válidas?
-    input wire [2:0]  dst1, dst2, dst3,     //Destino da instrução (banco, pc, memória...)
-    input wire [4:0]  rd1, rd2, rd3,        //RDs das instruções vindas
+    //---- Alocação: despacho, até 3 instruções por ciclo ----
+    input  wire [2:0]  v,                            // Slots válidos
+    input  wire [2:0]  dst1, dst2, dst3,             // Destino (000 banco, 010 Load, 100 Store)
+    input  wire [4:0]  rd1, rd2, rd3,                // Registrador de destino
+    output wire [4:0]  rob_tail,                     // Posição da próxima alocação (rob_id)
 
-    //Resultados vindo dos caminhos de resolução
-    input wire [2:0]  wb,                   //Veio uma resolução do caminho?
-    input wire [4:0]  rid1, rid2, rid3,     //Rob id das resoluções que estão vindo
-    input wire [31:0] r1, r2, r3,           //Resultados das resoluções
+    //---- Resultado: caminhos ----
+    input  wire [2:0]  wb,                           // Resultado válido em cada porta
+    input  wire [4:0]  rid1, rid2, rid3,             // rob_id do resultado
+    input  wire [31:0] r1, r2, r3,                   // Resultado (endereço, no Load)
 
-    //Sinais dos commits
-    output wire [2:0]  cdst1, cdst2, cdst3,         //Destino da instrução commitada
-    output wire [4:0]  crid1, crid2, crid3,         //Aonde essa instrução escreve?
-    output wire [31:0] cr1, cr2, cr3,               //Qual o resultado a ser escrito?
-    output wire [4:0] crob_id1, crob_id2, crob_id3, //Qual o id das instruções sendo commitadas?
+    //---- Load Buffer ----
+    input  wire [4:0]  lrid,                         // rob_id do Load em execução
+    output wire        lready,                       // O endereço dele já chegou
+    output wire [31:0] laddr,                        // Endereço do Load
+    input  wire        lb_done,                      // Um Load terminou: pode commitar
+    input  wire [4:0]  lb_rid,                       // rob_id desse Load
 
-    //Controle do Load Buffer
-    input  wire [4:0]  lrid,                //Load Buffer pergunta por esse id
-    output wire        lready,              //O endereço já está pronto?
-    output wire [31:0] laddr,               //Qual o endereço?
+    //---- Commit: banco, buffers e hazard (0 quando a instrução não sai) ----
+    output wire [2:0]  cdst1, cdst2, cdst3,          // Destino
+    output wire [4:0]  crid1, crid2, crid3,          // Registrador escrito
+    output wire [31:0] cr1, cr2, cr3,                // Resultado
+    output wire [4:0]  crob_id1, crob_id2, crob_id3, // rob_id
 
-    // Controle do Store Buffer
-    input  wire [4:0]  srid,   // Store Buffer pergunta por esse id
-    output wire [31:0] saddr,  // Endereço guardado no ROB para esse id
+    //---- Recuperação ----
+    input  wire        flush,                        // O caminho de desvio errou a previsão
+    input  wire [4:0]  flush_rob_id,                 // rob_id do desvio que errou (B)
+    output wire        flush_ok,                     // B ainda está no ROB: flush válido
+    output wire [4:0]  rob_head,                     // Head: referência de idade
 
-    //Porta de entrada do Load Buffer
-    input wire        lb_done,   // Load Buffer sinalizando que o dado chegou
-    input wire [4:0]  lb_rid,    // qual rob_id está pronto
-
-    //Sinal de parada para o despacho
-    output wire stop,
-
-    //Posição atual da Tail, para o despacho
-    output wire [4:0] rob_tail,
-
-    //IVAN FEATURE: Recuperação de desvio com previsão errada
-    input  wire       flush,          //O caminho de desvio errou a previsão
-    input  wire [4:0] flush_rob_id,   //rob_id do desvio que errou (B)
-    output wire       flush_ok,       //Flush válido: B ainda está no ROB (repassado às outras unidades)
-    output wire [4:0] rob_head        //Head do ROB: referência de idade para as outras unidades
+    //---- Controle ----
+    output wire        stop                          // ROB quase cheio: o despacho para
 );
-    // Layout do buffer:
-    //      32 posições de 43 bits cada:
-    // [42]    -> valid
-    // [41]    -> addr_ready (endereço pronto, Load Buffer pode buscar)
-    // [40]    -> ready (resultado pronto, pode commitar)
-    // [39:37] -> destination (3 bits)
-    // [36:32] -> rd  (5 bits)
-    // [31:0]  -> result
-    reg [42:0] buffer [0:31];
+
+    // Entradas (a ocupação é dada por head e tail: [head, tail))
+    reg        addr_ready [0:31];   // Load: endereço pronto, o Load Buffer pode ler
+    reg        ready      [0:31];   // Resultado pronto: pode commitar
+    reg [2:0]  dst        [0:31];   // Destino (banco, Load, Store)
+    reg [4:0]  rd         [0:31];
+    reg [31:0] result     [0:31];   // Resultado (no Load, primeiro o endereço)
     reg [5:0] head, tail;
 
     //Controle da Head
-    wire [5:0] commited;
+    wire [5:0] committed;
     wire [5:0] head2 = head + 1;
     wire [5:0] head3 = head + 2;
 
@@ -64,29 +93,26 @@ module rob(
     wire [5:0] tail3 = tail + 2;
 
     //Flags de commit pra cada instrução das três possíveis
-    wire c1 = buffer[head[4:0]][40];
-    wire c2 = buffer[head2[4:0]][40] & c1;
-    wire c3 = buffer[head3[4:0]][40] & c2;
+    wire c1 = ready[head[4:0]];
+    wire c2 = ready[head2[4:0]] & c1;
+    wire c3 = ready[head3[4:0]] & c2;
 
     //Expõe os dados de cada instrução se for commitada; Senão, expõe apenas 0
-    assign {cdst1, crid1, cr1} = c1 ? buffer[head[4:0]][39:0]  : 40'b0;
-    assign {cdst2, crid2, cr2} = c2 ? buffer[head2[4:0]][39:0] : 40'b0;
-    assign {cdst3, crid3, cr3} = c3 ? buffer[head3[4:0]][39:0] : 40'b0;
+    assign {cdst1, crid1, cr1} = c1 ? {dst[head[4:0]],  rd[head[4:0]],  result[head[4:0]]}  : 40'b0;
+    assign {cdst2, crid2, cr2} = c2 ? {dst[head2[4:0]], rd[head2[4:0]], result[head2[4:0]]} : 40'b0;
+    assign {cdst3, crid3, cr3} = c3 ? {dst[head3[4:0]], rd[head3[4:0]], result[head3[4:0]]} : 40'b0;
 
     //Cálculo de quantas instruções foram adicionadas ou commitadas
     assign dispatched = v[0] + v[1] + v[2];
-    assign commited   = c1 + c2 + c3;
+    assign committed  = c1 + c2 + c3;
 
     //Exposição para Load Buffer
-    assign lready = buffer[lrid][41];
-    assign laddr  = buffer[lrid][31:0];
+    assign lready = addr_ready[lrid];
+    assign laddr  = result[lrid];
 
     assign crob_id1 = c1 ? head[4:0]  : 5'b0;
     assign crob_id2 = c2 ? head2[4:0] : 5'b0;
     assign crob_id3 = c3 ? head3[4:0] : 5'b0;
-
-    //Exposição para Store Buffer
-    assign saddr = buffer[srid][31:0];
 
     //Sinal de parada caso não haja 3 ou mais espaços no buffer
     assign stop = ((tail - head) > 6'd29);
@@ -94,14 +120,7 @@ module rob(
     //Expõe o Tail para acomodar as novas posições
     assign rob_tail = tail[4:0];
 
-    //IVAN FEATURE: Recuperação
-    //Uma posição está ocupada se a sua distância ao head é menor que a ocupação.
-    //Isso valida o flush (desvio de um caminho já descartado é ignorado) e filtra
-    //resultados que chegam para posições livres (instruções já descartadas).
-    //Premissa: uma posição liberada não é realocada antes de o resultado atrasado
-    //chegar (hoje os caminhos levam 1 ciclo e a realocação leva mais que isso).
-    //As outras unidades medem a idade de suas entradas pela distância a este head:
-    //uma entrada é mais nova que B se (rob_id - rob_head) > (flush_rob_id - rob_head)
+    //Recuperação
     assign rob_head = head[4:0];
 
     wire [5:0] ocupadas = tail - head;
@@ -124,66 +143,69 @@ module rob(
         if (rst) begin
             head <= 6'd0;
             tail <= 6'd0;
-            for (i = 0; i < 32; i = i + 1)
-                buffer[i][42:40] <= 3'b0;  // limpa valid, addr_ready e ready
+            for (i = 0; i < 32; i = i + 1) begin
+                addr_ready[i] <= 1'b0;
+                ready[i]      <= 1'b0;
+            end
         end else begin
-            head <= head + commited;
+            head <= head + committed;
 
-            //IVAN FEATURE: No flush, o tail volta para logo depois de B e as
-            //alocações do ciclo (caminho errado) são ignoradas
             if (flush_ok)
                 tail <= head + {1'b0, dist_B} + 6'd1;
             else
                 tail <= tail + dispatched;
 
             // Se a instrução vem do despacho de forma válida, guarda ela
-            if(v[0] && !flush_ok) buffer[tail[4:0]]  <= {1'b1, 2'b0, dst1, rd1, 32'b0};
-            if(v[1] && !flush_ok) buffer[tail2[4:0]] <= {1'b1, 2'b0, dst2, rd2, 32'b0};
-            if(v[2] && !flush_ok) buffer[tail3[4:0]] <= {1'b1, 2'b0, dst3, rd3, 32'b0};
+            if(v[0] && !flush_ok) begin
+                dst[tail[4:0]] <= dst1; rd[tail[4:0]] <= rd1; result[tail[4:0]] <= 32'b0;
+                addr_ready[tail[4:0]] <= 1'b0; ready[tail[4:0]] <= 1'b0;
+            end
+            if(v[1] && !flush_ok) begin
+                dst[tail2[4:0]] <= dst2; rd[tail2[4:0]] <= rd2; result[tail2[4:0]] <= 32'b0;
+                addr_ready[tail2[4:0]] <= 1'b0; ready[tail2[4:0]] <= 1'b0;
+            end
+            if(v[2] && !flush_ok) begin
+                dst[tail3[4:0]] <= dst3; rd[tail3[4:0]] <= rd3; result[tail3[4:0]] <= 32'b0;
+                addr_ready[tail3[4:0]] <= 1'b0; ready[tail3[4:0]] <= 1'b0;
+            end
 
-            // Se a instrução foi resolvida, atualizamos o res e os bits de controle
-            //IVAN FEATURE: só para posições ocupadas (aceita*)
+            // Se a instrução foi resolvida, guarda o resultado; no Load é o endereço
+            // (addr_ready), nas outras o resultado final (ready)
             if(wb[0] && aceita1) begin
-                buffer[rid1][31:0] <= r1;
-                if(buffer[rid1][39:37] == 3'b010) begin
-                    buffer[rid1][41] <= 1'b1;
-                end else begin
-                    buffer[rid1][40] <= 1'b1;
-                end
+                result[rid1] <= r1;
+                if(dst[rid1] == 3'b010) addr_ready[rid1] <= 1'b1;
+                else                    ready[rid1]      <= 1'b1;
             end
 
             if(wb[1] && aceita2) begin
-                buffer[rid2][31:0] <= r2;
-                if(buffer[rid2][39:37] == 3'b010) begin
-                    buffer[rid2][41] <= 1'b1;
-                end else begin
-                    buffer[rid2][40] <= 1'b1;
-                end
+                result[rid2] <= r2;
+                if(dst[rid2] == 3'b010) addr_ready[rid2] <= 1'b1;
+                else                    ready[rid2]      <= 1'b1;
             end
 
             if(wb[2] && aceita3) begin
-                buffer[rid3][31:0] <= r3;
-                if(buffer[rid3][39:37] == 3'b010) begin
-                    buffer[rid3][41] <= 1'b1;
-                end else begin
-                    buffer[rid3][40] <= 1'b1;
-                end
+                result[rid3] <= r3;
+                if(dst[rid3] == 3'b010) addr_ready[rid3] <= 1'b1;
+                else                    ready[rid3]      <= 1'b1;
             end
 
             // Load Buffer sinaliza que o dado chegou — pode commitar
-            if(lb_done && aceita_lb) buffer[lb_rid][40] <= 1'b1;  // ready=1 (IVAN FEATURE: só se ocupada)
+            if(lb_done && aceita_lb) ready[lb_rid] <= 1'b1;
 
-            // Se foi commitada, torna-se inválida e não pronta
-            if(c1) buffer[head[4:0]][42:40]  <= 3'b0;
-            if(c2) buffer[head2[4:0]][42:40] <= 3'b0;
-            if(c3) buffer[head3[4:0]][42:40] <= 3'b0;
+            // Se foi commitada, deixa de estar pronta (a posição fica livre)
+            if(c1) begin addr_ready[head[4:0]]  <= 1'b0; ready[head[4:0]]  <= 1'b0; end
+            if(c2) begin addr_ready[head2[4:0]] <= 1'b0; ready[head2[4:0]] <= 1'b0; end
+            if(c3) begin addr_ready[head3[4:0]] <= 1'b0; ready[head3[4:0]] <= 1'b0; end
 
-            //IVAN FEATURE: Limpeza das entradas mais novas que B.
+            //Limpeza das entradas mais novas que B.
             //Fica por último para vencer os wb do mesmo ciclo (vale a última atribuição).
             if (flush_ok) begin
                 for (i = 0; i < 32; i = i + 1) begin
                     dist_i = i[4:0] - head[4:0];
-                    if (dist_i > dist_B) buffer[i][42:40] <= 3'b0;
+                    if (dist_i > dist_B) begin
+                        addr_ready[i] <= 1'b0;
+                        ready[i]      <= 1'b0;
+                    end
                 end
             end
         end

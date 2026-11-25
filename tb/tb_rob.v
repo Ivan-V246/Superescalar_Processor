@@ -17,10 +17,6 @@ wire [31:0] laddr;
 reg         lb_done;
 reg  [4:0]  lb_rid;
 
-// Dummy — Store Buffer
-reg  [4:0]  srid_dummy;
-wire [31:0] saddr;
-
 // Saídas do ROB
 wire [2:0]  cdst1, cdst2, cdst3;
 wire [4:0]  crid1, crid2, crid3;
@@ -50,7 +46,6 @@ rob U_rob (
     .cr1(cr1), .cr2(cr2), .cr3(cr3),
     .lrid(lrid_dummy), .lready(lready), .laddr(laddr),
     .lb_done(lb_done), .lb_rid(lb_rid),
-    .srid(srid_dummy), .saddr(saddr),
     .stop(stop),
     .rob_tail(rob_tail),
     //IVAN FEATURE
@@ -148,7 +143,6 @@ initial begin
     {r1,r2,r3}       = 96'b0;
     lb_done = 0; lb_rid = 5'b0;
     lrid_dummy = 5'b0;
-    srid_dummy = 5'b0;
     flush = 0; flush_rob_id = 5'd0;  //IVAN FEATURE
     @(posedge clk); #1;
     rst = 0;
@@ -235,22 +229,22 @@ initial begin
     // Ciclo do flush: B termina, erra, e o despacho tenta alocar (caminho errado)
     wb = 3'b001; rid1 = 5'd2; r1 = 32'd22;
     flush = 1; flush_rob_id = 5'd2;
-    v = 3'b111; {dst1,dst2,dst3} = 9'b0;
+    v = 3'b111; {dst1,dst2,dst3} = 9'b0; {rd1,rd2,rd3} = {5'd20,5'd21,5'd22};
     #1;
     checa(flush_ok === 1'b1, "flush de B valido");
     @(posedge clk); #1;
     wb = 0; flush = 0; v = 0;
     checa(U_rob.tail === 6'd3, "tail volta para B+1");
-    checa(U_rob.buffer[2][40] === 1'b1, "B recebe o proprio resultado");
-    checa(U_rob.buffer[3][42:40] === 3'b0 && U_rob.buffer[4][42:40] === 3'b0,
+    checa(U_rob.ready[2] === 1'b1, "B recebe o proprio resultado");
+    checa(U_rob.ready[3] === 1'b0 && U_rob.ready[4] === 1'b0,
           "entradas mais novas que B limpas");
-    checa(U_rob.buffer[6][42] === 1'b0, "alocacao do ciclo do flush ignorada");
+    checa(U_rob.rd[6] !== 5'd20, "alocacao do ciclo do flush ignorada");
 
     // Resultados atrasados de instruções descartadas
     writeback(3'b001, 5'd5,5'd0,5'd0, 32'd55,32'd0,32'd0);
-    checa(U_rob.buffer[5][40] === 1'b0, "wb atrasado ignorado");
+    checa(U_rob.ready[5] === 1'b0, "wb atrasado ignorado");
     lb_done = 1; lb_rid = 5'd4; @(posedge clk); #1; lb_done = 0;
-    checa(U_rob.buffer[4][40] === 1'b0, "lb_done atrasado ignorado");
+    checa(U_rob.ready[4] === 1'b0, "lb_done atrasado ignorado");
 
     // Flush de um desvio já descartado
     flush = 1; flush_rob_id = 5'd4; #1;
@@ -270,8 +264,8 @@ initial begin
     flush = 1; flush_rob_id = 5'd3;
     @(posedge clk); #1;
     wb = 0; flush = 0;
-    checa(U_rob.buffer[3][40] === 1'b1, "B pronto");
-    checa(U_rob.buffer[4][40] === 1'b0, "wb da mais nova perde para a limpeza");
+    checa(U_rob.ready[3] === 1'b1, "B pronto");
+    checa(U_rob.ready[4] === 1'b0, "wb da mais nova perde para a limpeza");
     checa(U_rob.tail === 6'd4, "tail = B+1");
 
     // O head precisa já ter dado uma volta (bit de volta = 1) para testar a conta do tail
@@ -289,10 +283,10 @@ initial begin
     flush = 1; flush_rob_id = 5'd31;
     @(posedge clk); #1; flush = 0;
     checa(U_rob.tail === 6'd0, "tail = 64 -> 0 (posicao 0, bit de volta certo)");
-    checa(U_rob.buffer[0][42:40] === 3'b0 && U_rob.buffer[1][42:40] === 3'b0,
+    checa(U_rob.ready[0] === 1'b0 && U_rob.ready[1] === 1'b0,
           "entradas depois da volta limpas");
-    checa(U_rob.buffer[28][42] === 1'b1 && U_rob.buffer[31][42] === 1'b1,
-          "entradas antes de B e B mantidas");
+    checa((U_rob.tail - U_rob.head) === 6'd4,
+          "entradas antes de B e B mantidas (28..31)");
 
     //IVAN FEATURE: Commit e flush no mesmo ciclo
     // rob 0..5; 0, 1 e 2 prontos fazem commit no ciclo em que B = 3 erra
@@ -310,10 +304,10 @@ initial begin
     wb = 0; flush = 0;
     checa(U_rob.head === 6'd3, "head avanca pelo commit (3)");
     checa(U_rob.tail === 6'd4, "tail = B+1 (4)");
-    checa(U_rob.buffer[3][40] === 1'b1, "B pronto");
-    checa(U_rob.buffer[4][42:40] === 3'b0 && U_rob.buffer[5][42:40] === 3'b0,
+    checa(U_rob.ready[3] === 1'b1, "B pronto");
+    checa(U_rob.ready[4] === 1'b0 && U_rob.ready[5] === 1'b0,
           "entradas mais novas que B limpas");
-    checa(U_rob.buffer[0][42] === 1'b0 && U_rob.buffer[2][42] === 1'b0,
+    checa(U_rob.ready[0] === 1'b0 && U_rob.ready[2] === 1'b0,
           "commitadas liberadas");
     @(posedge clk); #1;
     checa(U_rob.head === 6'd4 && U_rob.tail === 6'd4, "B commita e o ROB esvazia");
